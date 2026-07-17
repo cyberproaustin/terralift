@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -58,9 +59,13 @@ func Reconcile(run *core.Run, inv *model.Inventory, export *provider.ExportResul
 		if err := copyTF(c.Dir, dst); err != nil {
 			run.Log.Warn("Reconcile", "copy HCL: %v", err)
 		}
+		// The reconciled backend.tf is authoritative; strip any backend block the
+		// export tool emitted (aztfexport writes `backend "local" {}`), else
+		// terraform rejects two backend blocks.
+		stripBackends(dst)
 		// Rewire literal cloud-ids in the generated HCL to azurerm/google_x.y.id
 		// references (dependency ordering + portability for a clean rebuild).
-		if n := rewireStack(dst, c.AddressByID); n > 0 {
+		if n := rewireStack(dst, c.ConfigFiles, c.AddressByID); n > 0 {
 			run.Log.Info("Reconcile", "rewired %d reference(s) in %s", n, filepath.Base(dst))
 		}
 		_ = os.WriteFile(filepath.Join(dst, "backend.tf"), []byte(tmpl.BackendTF), 0o644)
@@ -70,21 +75,28 @@ func Reconcile(run *core.Run, inv *model.Inventory, export *provider.ExportResul
 	return nil
 }
 
-// rewireStack rewires literal ids -> references in generated.tf, returns count.
-func rewireStack(stackDir string, addrByID map[string]string) int {
-	if len(addrByID) == 0 {
+// rewireStack rewires literal ids -> references in each provider-declared config
+// file (generated.tf for GCP, main.tf for Azure), returning the total count.
+// Only these files are touched — never import.tf, whose `id = "..."` literals
+// must stay literal.
+func rewireStack(stackDir string, configFiles []string, addrByID map[string]string) int {
+	if len(addrByID) == 0 || len(configFiles) == 0 {
 		return 0
 	}
-	gen := filepath.Join(stackDir, "generated.tf")
-	data, err := os.ReadFile(gen)
-	if err != nil {
-		return 0
+	total := 0
+	for _, name := range configFiles {
+		p := filepath.Join(stackDir, name)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		out, n := reconcile.Rewire(string(data), addrByID)
+		if n > 0 {
+			_ = os.WriteFile(p, []byte(out), 0o644)
+			total += n
+		}
 	}
-	out, n := reconcile.Rewire(string(data), addrByID)
-	if n > 0 {
-		_ = os.WriteFile(gen, []byte(out), 0o644)
-	}
-	return n
+	return total
 }
 
 // Correctness (Phase 5): terraform plan round-trip oracle per live stack. In
@@ -220,6 +232,56 @@ func copyTF(srcDir, dstDir string) error {
 }
 
 func writeMarkdown(path, content string) { _ = os.WriteFile(path, []byte(content), 0o644) }
+
+var backendStart = regexp.MustCompile(`^\s*backend\s+"[^"]+"\s*\{`)
+
+// stripBackends removes every `backend "..." { ... }` block from the .tf files in
+// dir (brace-balanced; handles single-line `backend "local" {}` and multi-line
+// forms) so only the reconciled backend.tf configures state.
+func stripBackends(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if out, n := stripBackendBlocks(string(data)); n > 0 {
+			_ = os.WriteFile(p, []byte(out), 0o644)
+		}
+	}
+}
+
+func stripBackendBlocks(hcl string) (string, int) {
+	lines := strings.Split(hcl, "\n")
+	out := make([]string, 0, len(lines))
+	removed, depth, inBlock := 0, 0, false
+	for _, l := range lines {
+		if !inBlock {
+			if backendStart.MatchString(l) {
+				removed++
+				if d := strings.Count(l, "{") - strings.Count(l, "}"); d > 0 {
+					inBlock = true
+					depth = d
+				}
+				continue
+			}
+			out = append(out, l)
+			continue
+		}
+		depth += strings.Count(l, "{") - strings.Count(l, "}")
+		if depth <= 0 {
+			inBlock = false
+		}
+	}
+	return strings.Join(out, "\n"), removed
+}
 
 func coverageMD(c reconcile.CoverageReport) string {
 	var b strings.Builder
