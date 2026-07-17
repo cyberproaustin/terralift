@@ -46,9 +46,46 @@ func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Invento
 }
 
 func (p *Provider) Templates() provider.ProviderTemplates {
-	// M4: google/google-beta provider.tf, gcs backend.tf (keyless via ADC/WIF),
-	// GitHub Actions + Azure DevOps WIF pipelines.
-	return provider.ProviderTemplates{}
+	return provider.ProviderTemplates{
+		ProviderTF: `terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {}
+`,
+		// Keyless remote state: bucket/prefix supplied at init via -backend-config;
+		// auth via ADC / Workload Identity Federation, never a service-account key
+		// (inline creds would leak into .terraform and plan files).
+		BackendTF: `terraform {
+  backend "gcs" {
+    # -backend-config="bucket=..." -backend-config="prefix=..."
+    # auth: ADC / WIF (no keys). Never inline credentials.
+  }
+}
+`,
+		Pipeline: `# GitHub Actions: plan-on-PR + gated apply, Workload Identity Federation (no keys).
+name: terraform
+on:
+  pull_request: { paths: [ 'live/**' ] }
+  push: { branches: [ main ], paths: [ 'live/**' ] }
+permissions: { contents: read, id-token: write }
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: '${{ vars.WIF_PROVIDER }}'  # Direct WIF, no SA key
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init && terraform validate && terraform plan
+`,
+	}
 }
 
 func notImplemented(method string) error {

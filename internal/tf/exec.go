@@ -33,3 +33,13 @@ func (r *Runner) Init(ctx context.Context) (string, error) {
 func (r *Runner) GenerateConfig(ctx context.Context, outFile string) (string, error) {
 	return r.run(ctx, "plan", "-input=false", "-no-color", "-generate-config-out="+outFile)
 }
+
+// Plan runs `terraform plan -out=<file>`.
+func (r *Runner) Plan(ctx context.Context, outFile string) (string, error) {
+	return r.run(ctx, "plan", "-input=false", "-no-color", "-out="+outFile)
+}
+
+// ShowJSON runs `terraform show -json <plan>` (feeds ParseRoundTrip).
+func (r *Runner) ShowJSON(ctx context.Context, planFile string) (string, error) {
+	return r.run(ctx, "show", "-json", planFile)
+}

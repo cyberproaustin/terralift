@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/cyberproaustin/terralift/internal/core"
 	"github.com/cyberproaustin/terralift/internal/model"
+	"github.com/cyberproaustin/terralift/internal/pipeline"
 	"github.com/cyberproaustin/terralift/internal/provider"
 
 	// Blank imports register each cloud provider via its init().
@@ -69,7 +69,8 @@ func main() {
 // (provider-agnostic) reconcile/correctness/package layer. Skeleton: provider
 // methods return "not implemented" until the milestones fill them in.
 func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
-	var inv *model.Inventory // carried from Phase 2 to Phase 3 in-process
+	var inv *model.Inventory        // carried from Phase 2 into later phases
+	var export *provider.ExportResult // carried from Phase 3 into Phase 4
 	for _, n := range phases {
 		switch n {
 		case 1:
@@ -106,11 +107,29 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 				run.Log.Warn("Export", "%v", err)
 				break
 			}
+			export = res
 			for _, c := range res.Containers {
 				run.Log.Info("Export", "container %s: %d mapped, %d unmapped (mode=%s)", c.Container, len(c.MappedIDs), len(c.UnmappedIDs), res.Mode)
 			}
-		case 4, 5, 6:
-			run.Log.Info(fmt.Sprintf("Phase%d", n), "=== Phase %d (shared, cloud-agnostic) — not implemented yet ===", n)
+		case 4:
+			run.Log.Info("Reconcile", "=== Phase 4 Reconcile ===")
+			if inv == nil || export == nil {
+				run.Log.Warn("Reconcile", "need Phase 2+3 output in-process; run 2,3,4 together")
+				break
+			}
+			if err := pipeline.Reconcile(run, inv, export, p.Templates()); err != nil {
+				run.Log.Warn("Reconcile", "%v", err)
+			}
+		case 5:
+			run.Log.Info("Correctness", "=== Phase 5 Correctness ===")
+			if err := pipeline.Correctness(ctx, run); err != nil {
+				run.Log.Warn("Correctness", "%v", err)
+			}
+		case 6:
+			run.Log.Info("Package", "=== Phase 6 Package ===")
+			if _, err := pipeline.Package(run); err != nil {
+				run.Log.Warn("Package", "%v", err)
+			}
 		default:
 			run.Log.Warn("", "unknown phase %d, skipping", n)
 		}
