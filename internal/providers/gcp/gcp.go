@@ -7,7 +7,6 @@ package gcp
 
 import (
 	"context"
-	"errors"
 
 	"github.com/cyberproaustin/terralift/internal/core"
 	"github.com/cyberproaustin/terralift/internal/model"
@@ -22,15 +21,11 @@ type Provider struct{}
 func (p *Provider) Name() string { return "gcp" }
 
 func (p *Provider) CheckDependencies(ctx context.Context, run *core.Run) (*provider.DependencyReport, error) {
-	// M1: detect gcloud (gcloud.cmd on Windows) + terraform; verify
-	// cloudasset.googleapis.com is enabled; validate both auth planes.
-	return nil, notImplemented("CheckDependencies")
+	return checkDependencies(ctx, run)
 }
 
 func (p *Provider) Connect(ctx context.Context, run *core.Run) (*provider.AuthContext, error) {
-	// M1: validate gcloud CLI auth AND ADC (gcloud auth application-default);
-	// optional impersonation; resolve scope + descendant projects.
-	return nil, notImplemented("Connect")
+	return connect(ctx, run)
 }
 
 func (p *Provider) Enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
@@ -47,6 +42,9 @@ func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Invento
 
 func (p *Provider) Templates() provider.ProviderTemplates {
 	return provider.ProviderTemplates{
+		MigrationAttrs: map[string]string{
+			"project": "project", "region": "region", "zone": "zone", "location": "location",
+		},
 		ProviderTF: `terraform {
   required_providers {
     google = {
@@ -86,8 +84,4 @@ jobs:
       - run: terraform init && terraform validate && terraform plan
 `,
 	}
-}
-
-func notImplemented(method string) error {
-	return errors.New("gcp: " + method + " not implemented yet")
 }

@@ -72,12 +72,20 @@ func main() {
 }
 
 // runPipeline dispatches phases 1-3 to the cloud provider and 4-6 to the shared
-// (provider-agnostic) reconcile/correctness/package layer. Skeleton: provider
-// methods return "not implemented" until the milestones fill them in.
+// (provider-agnostic) reconcile/correctness/package layer. In --dry-run it detects
+// and reports (phases 1-2 + hygiene) and writes no repo.
 func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
 	var inv *model.Inventory          // carried from Phase 2 into later phases
 	var export *provider.ExportResult // carried from Phase 3 into Phase 4
 	for _, n := range phases {
+		// Dry-run stops before any generating phase: report from the inventory only.
+		if run.DryRun && n >= 3 {
+			if inv != nil {
+				pipeline.DryReport(run, inv)
+			}
+			run.Log.Info("", "dry-run complete — detection + reports only, no repo written")
+			return nil
+		}
 		switch n {
 		case 1:
 			run.Log.Info("Preflight", "=== Phase 1 Preflight ===")
@@ -137,7 +145,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			run.Log.Warn("", "unknown phase %d, skipping", n)
 		}
 	}
-	run.Log.Info("", "skeleton pipeline complete (phase logic pending)")
+	run.Log.Info("", "run complete")
 	return nil
 }
 

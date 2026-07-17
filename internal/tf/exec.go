@@ -27,6 +27,13 @@ func (r *Runner) Init(ctx context.Context) (string, error) {
 	return r.run(ctx, "init", "-input=false", "-no-color")
 }
 
+// InitLocal initializes with the remote backend skipped (local state). The
+// correctness oracle only needs to plan against reality, not manage remote
+// state, so it must not require the reconciled backend.tf's -backend-config.
+func (r *Runner) InitLocal(ctx context.Context) (string, error) {
+	return r.run(ctx, "init", "-input=false", "-no-color", "-backend=false")
+}
+
 // GenerateConfig runs `terraform plan -generate-config-out=<out>` to draft HCL
 // for the import blocks in the working dir. Config generation is experimental
 // (may over-emit / leak values), so callers curate the output.

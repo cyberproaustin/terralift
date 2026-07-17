@@ -39,6 +39,9 @@ func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Invento
 
 func (p *Provider) Templates() provider.ProviderTemplates {
 	return provider.ProviderTemplates{
+		MigrationAttrs: map[string]string{
+			"region": "region", "availability_zone": "availability_zone",
+		},
 		ProviderTF: `terraform {
   required_providers {
     aws = {

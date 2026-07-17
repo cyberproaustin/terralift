@@ -37,6 +37,9 @@ func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Invento
 
 func (p *Provider) Templates() provider.ProviderTemplates {
 	return provider.ProviderTemplates{
+		MigrationAttrs: map[string]string{
+			"location": "location", "resource_group_name": "resource_group_name",
+		},
 		ProviderTF: `terraform {
   required_providers {
     azurerm = {

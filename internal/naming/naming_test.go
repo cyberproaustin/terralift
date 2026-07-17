@@ -4,11 +4,11 @@ import "testing"
 
 func TestSanitize(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"rg-App.01", "rg_app_01"},   // lower-case + non-alnum -> _
-		{"123abc", "r_123abc"},       // cannot start with a digit
-		{"ASP-x--y", "asp_x_y"},      // collapse repeated underscores
+		{"rg-App.01", "rg_app_01"}, // lower-case + non-alnum -> _
+		{"123abc", "r_123abc"},     // cannot start with a digit
+		{"ASP-x--y", "asp_x_y"},    // collapse repeated underscores
 		{"stbvaadmindev", "stbvaadmindev"},
-		{"---", "resource"},          // empty after trim -> placeholder
+		{"---", "resource"}, // empty after trim -> placeholder
 	}
 	for _, c := range cases {
 		if got := Sanitize(c.in); got != c.want {

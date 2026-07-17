@@ -69,6 +69,10 @@ type ProviderTemplates struct {
 	ProviderTF string
 	BackendTF  string
 	Pipeline   string
+	// MigrationAttrs maps HCL attributes that pin a resource to its source scope
+	// (e.g. location, resource_group_name, project) to the migration variable they
+	// become in clone mode, so generated config re-targets to a new environment.
+	MigrationAttrs map[string]string
 }
 
 // --- registry -------------------------------------------------------------
