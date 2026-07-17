@@ -16,6 +16,8 @@ func deriveImportID(r *model.Resource) string {
 	var id string
 	if fn, ok := importIDOverride[r.TFType]; ok {
 		id = fn(r)
+	} else if fn, ok := importIDOverrideExtra[r.TFType]; ok {
+		id = fn(r) // full-ARN imports from the native sweep (coverage.go)
 	} else {
 		id = arnName(r.ID)
 	}

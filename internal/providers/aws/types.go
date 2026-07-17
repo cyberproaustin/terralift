@@ -97,7 +97,11 @@ func awsManagedDefault(nativeType, name string) bool {
 }
 
 func awsTypeToTFType(reType string) string {
-	return awsTypeToTF[strings.ToLower(reType)]
+	k := strings.ToLower(reType)
+	if t, ok := awsTypeToTF[k]; ok {
+		return t
+	}
+	return awsTypeToTFExtra[k] // full native-resource sweep (coverage.go)
 }
 
 // globalServices are AWS services whose resources are not region-scoped; their
