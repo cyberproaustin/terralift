@@ -3,36 +3,29 @@ package reconcile
 import "testing"
 
 func TestCoverage(t *testing.T) {
-	// Exporter is a superset: 8 enumerated, all exported, +25 child/implicit.
-	enum := make([]string, 8)
-	exp := make([]string, 0, 33)
-	for i := 0; i < 8; i++ {
-		id := string(rune('a' + i))
-		enum[i] = id
-		exp = append(exp, id)
-	}
-	for i := 0; i < 25; i++ {
-		exp = append(exp, "child-"+string(rune('a'+i)))
-	}
-	r := Coverage(enum, exp, nil)
-	if r.Covered != 8 || r.CoveragePct != 100 {
-		t.Errorf("covered=%d pct=%v, want 8 / 100", r.Covered, r.CoveragePct)
-	}
-	if r.ExtraExported != 25 {
-		t.Errorf("extraExported=%d, want 25", r.ExtraExported)
-	}
-	if len(r.Missing) != 0 {
-		t.Errorf("missing=%d, want 0", len(r.Missing))
+	// All enumerated resources exported, nothing excluded.
+	enum := []string{"a", "b", "c", "d"}
+	r := Coverage(enum, enum, nil, nil)
+	if r.Covered != 4 || r.CoveragePct != 100 || r.Gap != 0 {
+		t.Errorf("covered=%d pct=%v gap=%d, want 4/100/0", r.Covered, r.CoveragePct, r.Gap)
 	}
 
-	// Gap case: one enumerated resource not exported.
-	r2 := Coverage([]string{"x", "y", "z"}, []string{"x", "y"},
-		map[string]MissingResource{"z": {ID: "z", Type: "google_thing"}})
-	if r2.Covered != 2 || len(r2.Missing) != 1 || r2.Missing[0].Type != "google_thing" {
-		t.Errorf("gap case wrong: covered=%d missing=%v", r2.Covered, r2.Missing)
+	// enumerated {x,y,z}: x exported, y intentionally excluded, z is a real gap.
+	// considered = 3 - 1(excluded) = 2; covered = 2 - 1(gap) = 1; pct = 50.
+	r2 := Coverage(
+		[]string{"x", "y", "z"},
+		[]string{"x"},
+		[]string{"y"},
+		map[string]MissingResource{"z": {ID: "z", Type: "google_thing"}},
+	)
+	if r2.Excluded != 1 || r2.Considered != 2 || r2.Covered != 1 || r2.Gap != 1 {
+		t.Errorf("excluded=%d considered=%d covered=%d gap=%d, want 1/2/1/1", r2.Excluded, r2.Considered, r2.Covered, r2.Gap)
 	}
-	if r2.CoveragePct <= 66 || r2.CoveragePct >= 67 {
-		t.Errorf("pct=%v, want ~66.7", r2.CoveragePct)
+	if r2.CoveragePct != 50 {
+		t.Errorf("pct=%v, want 50", r2.CoveragePct)
+	}
+	if len(r2.Missing) != 1 || r2.Missing[0].Type != "google_thing" {
+		t.Errorf("missing wrong: %v", r2.Missing)
 	}
 }
 

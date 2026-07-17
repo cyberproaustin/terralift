@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/cyberproaustin/terralift/internal/core"
@@ -19,24 +20,26 @@ import (
 	"github.com/cyberproaustin/terralift/internal/tf"
 )
 
-// Reconcile (Phase 4): coverage gap, hygiene report, and the /live layout.
+// Reconcile (Phase 4): coverage gap, hygiene report, reference rewire, /live layout.
 func Reconcile(run *core.Run, inv *model.Inventory, export *provider.ExportResult, tmpl provider.ProviderTemplates) error {
-	// --- coverage ---
+	// --- coverage (sorted enumeration for stable diffs; excluded != gap) ---
 	enumIDs := make([]string, 0, len(inv.Resources))
 	meta := make(map[string]reconcile.MissingResource, len(inv.Resources))
 	for id, r := range inv.Resources {
 		enumIDs = append(enumIDs, id)
 		meta[id] = reconcile.MissingResource{ID: r.ID, Type: r.NativeType, Name: r.Name, Container: r.Container}
 	}
-	var exported []string
+	sort.Strings(enumIDs)
+	var exported, excluded []string
 	for _, c := range export.Containers {
 		exported = append(exported, c.MappedIDs...)
+		excluded = append(excluded, c.ExcludedIDs...)
 	}
-	cov := reconcile.Coverage(enumIDs, exported, meta)
+	cov := reconcile.Coverage(enumIDs, exported, excluded, meta)
 	_ = core.WriteJSON(filepath.Join(run.Paths.Reports, "coverage.json"), cov)
 	writeMarkdown(filepath.Join(run.Paths.Reports, "coverage.md"), coverageMD(cov))
-	run.Log.Info("Reconcile", "coverage: %d/%d exported (%.1f%%), %d in gap, %d extra captured",
-		cov.Covered, cov.Enumerated, cov.CoveragePct, len(cov.Missing), cov.ExtraExported)
+	run.Log.Info("Reconcile", "coverage: %d/%d considered exported (%.1f%%), %d excluded, %d gap",
+		cov.Covered, cov.Considered, cov.CoveragePct, cov.Excluded, cov.Gap)
 
 	// --- hygiene ---
 	hyg := reconcile.Hygiene(inv)
@@ -45,7 +48,7 @@ func Reconcile(run *core.Run, inv *model.Inventory, export *provider.ExportResul
 	run.Log.Info("Reconcile", "hygiene: %d privileged (%d human), %d publicly exposed",
 		hyg.PrivilegedBindings, hyg.HumanPrivileged, hyg.PubliclyExposed)
 
-	// --- layout: repo/live/<container>/ (imported HCL + backend) ---
+	// --- layout: repo/live/<container>/ with reference-rewired HCL + backend ---
 	stacks := 0
 	for _, c := range export.Containers {
 		dst := filepath.Join(run.Paths.Repo, "live", naming.Sanitize(c.Container))
@@ -55,11 +58,33 @@ func Reconcile(run *core.Run, inv *model.Inventory, export *provider.ExportResul
 		if err := copyTF(c.Dir, dst); err != nil {
 			run.Log.Warn("Reconcile", "copy HCL: %v", err)
 		}
+		// Rewire literal cloud-ids in the generated HCL to azurerm/google_x.y.id
+		// references (dependency ordering + portability for a clean rebuild).
+		if n := rewireStack(dst, c.AddressByID); n > 0 {
+			run.Log.Info("Reconcile", "rewired %d reference(s) in %s", n, filepath.Base(dst))
+		}
 		_ = os.WriteFile(filepath.Join(dst, "backend.tf"), []byte(tmpl.BackendTF), 0o644)
 		stacks++
 	}
 	run.Log.Info("Reconcile", "layout: %d live stack(s) -> %s", stacks, filepath.Join(run.Paths.Repo, "live"))
 	return nil
+}
+
+// rewireStack rewires literal ids -> references in generated.tf, returns count.
+func rewireStack(stackDir string, addrByID map[string]string) int {
+	if len(addrByID) == 0 {
+		return 0
+	}
+	gen := filepath.Join(stackDir, "generated.tf")
+	data, err := os.ReadFile(gen)
+	if err != nil {
+		return 0
+	}
+	out, n := reconcile.Rewire(string(data), addrByID)
+	if n > 0 {
+		_ = os.WriteFile(gen, []byte(out), 0o644)
+	}
+	return n
 }
 
 // Correctness (Phase 5): terraform plan round-trip oracle per live stack. In
@@ -77,22 +102,30 @@ func Correctness(ctx context.Context, run *core.Run) error {
 	}
 	liveRoot := filepath.Join(run.Paths.Repo, "live")
 	entries, _ := os.ReadDir(liveRoot)
-	clean, remainder := 0, 0
+	clean, remainder, failed := 0, 0, 0
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		sd := filepath.Join(liveRoot, e.Name())
 		r := tf.New(sd)
-		if _, err := r.Init(ctx); err != nil {
+		if out, err := r.Init(ctx); err != nil {
+			run.Log.Warn("Correctness", "init failed in %s: %v", e.Name(), err)
+			run.Log.Verbose("Correctness", "%s", out)
+			failed++
 			continue
 		}
 		planFile := filepath.Join(sd, "tl.plan")
-		if _, err := r.Plan(ctx, planFile); err != nil {
+		if out, err := r.Plan(ctx, planFile); err != nil {
+			run.Log.Warn("Correctness", "plan failed in %s: %v", e.Name(), err)
+			run.Log.Verbose("Correctness", "%s", out)
+			failed++
 			continue
 		}
 		js, err := r.ShowJSON(ctx, planFile)
 		if err != nil {
+			run.Log.Warn("Correctness", "show failed in %s: %v", e.Name(), err)
+			failed++
 			continue
 		}
 		if rt, err := tf.ParseRoundTrip([]byte(js)); err == nil {
@@ -100,15 +133,20 @@ func Correctness(ctx context.Context, run *core.Run) error {
 			remainder += len(rt.Drift)
 		}
 	}
-	rep := map[string]any{"status": "ran", "planClean": clean, "remainder": remainder}
+	status := "ran"
+	if failed > 0 {
+		status = "partial"
+	}
+	rep := map[string]any{"status": status, "planClean": clean, "remainder": remainder, "failedStacks": failed}
 	_ = core.WriteJSON(filepath.Join(run.Paths.Reports, "correctness.json"), rep)
 	writeMarkdown(filepath.Join(run.Paths.Reports, "correctness.md"),
-		fmt.Sprintf("# Correctness (round-trip)\n\n- Plan-clean: **%d**\n- Remainder (drift): **%d**\n", clean, remainder))
-	run.Log.Info("Correctness", "plan-clean=%d remainder=%d", clean, remainder)
+		fmt.Sprintf("# Correctness (round-trip)\n\n- Status: **%s**\n- Plan-clean: **%d**\n- Remainder (drift): **%d**\n- Failed stacks: **%d**\n", status, clean, remainder, failed))
+	run.Log.Info("Correctness", "status=%s plan-clean=%d remainder=%d failed=%d", status, clean, remainder, failed)
 	return nil
 }
 
-// Package (Phase 6): zip repo/ + reports/ into package/onboarding.zip.
+// Package (Phase 6): zip repo/ + reports/ into package/onboarding.zip. Close
+// errors are propagated so a truncated archive is never reported as success.
 func Package(run *core.Run) (string, error) {
 	if err := os.MkdirAll(run.Paths.Package, 0o755); err != nil {
 		return "", err
@@ -118,17 +156,15 @@ func Package(run *core.Run) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 	zw := zip.NewWriter(f)
-	defer zw.Close()
 
-	addTree := func(root, prefix string) {
+	addTree := func(root, prefix string) error {
 		if _, err := os.Stat(root); err != nil {
-			return
+			return nil
 		}
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
-				return nil
+				return err
 			}
 			rel, _ := filepath.Rel(root, path)
 			w, err := zw.Create(filepath.Join(prefix, rel))
@@ -144,8 +180,19 @@ func Package(run *core.Run) (string, error) {
 			return err
 		})
 	}
-	addTree(run.Paths.Repo, "repo")
-	addTree(run.Paths.Reports, "reports")
+	werr := addTree(run.Paths.Repo, "repo")
+	if werr == nil {
+		werr = addTree(run.Paths.Reports, "reports")
+	}
+	if cerr := zw.Close(); werr == nil {
+		werr = cerr
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return "", fmt.Errorf("package: %w", werr)
+	}
 	run.Log.Info("Package", "onboarding package -> %s", zipPath)
 	return zipPath, nil
 }
@@ -177,10 +224,10 @@ func writeMarkdown(path, content string) { _ = os.WriteFile(path, []byte(content
 func coverageMD(c reconcile.CoverageReport) string {
 	var b strings.Builder
 	b.WriteString("# Coverage Gap Report (control-plane only)\n\n")
-	fmt.Fprintf(&b, "- Enumerated: **%d**\n- Of those, exported: **%d** (**%.1f%%**)\n- In gap (unsupported/skipped): **%d**\n- Extra captured beyond floor: **%d**\n\n",
-		c.Enumerated, c.Covered, c.CoveragePct, len(c.Missing), c.ExtraExported)
+	fmt.Fprintf(&b, "- Enumerated: **%d**\n- Considered (enumerated − excluded): **%d**\n- Of those, exported: **%d** (**%.1f%%**)\n- Intentionally excluded (managed/default/noise): **%d**\n- Gap (unsupported type): **%d**\n\n",
+		c.Enumerated, c.Considered, c.Covered, c.CoveragePct, c.Excluded, c.Gap)
 	if len(c.Missing) > 0 {
-		b.WriteString("## Gap detail\n\n")
+		b.WriteString("## Gap detail (unsupported types)\n\n")
 		for _, m := range c.Missing {
 			fmt.Fprintf(&b, "- `%s` %s\n", m.Type, m.Name)
 		}
