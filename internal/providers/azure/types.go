@@ -41,7 +41,11 @@ var azureTypeToTF = map[string]string{
 }
 
 func azureTypeToTFType(azureType string) string {
-	return azureTypeToTF[strings.ToLower(azureType)]
+	k := strings.ToLower(azureType)
+	if t, ok := azureTypeToTF[k]; ok {
+		return t
+	}
+	return azureTypeToTFExtra[k] // full native-resource sweep (coverage.go)
 }
 
 // roleInfo is a resolved role definition: display name + privilege flag.
