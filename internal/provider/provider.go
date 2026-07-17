@@ -60,6 +60,7 @@ type ContainerExport struct {
 	ExcludedIDs []string          // intentionally skipped: managed/default/sub-resource/noise
 	GapIDs      []string          // genuinely unsupported types (no TF mapping)
 	AddressByID map[string]string // canonical resource id -> tf address (for reference rewire)
+	ConfigFiles []string          // generated HCL file names safe to rewire (e.g. generated.tf, main.tf) — NOT import.tf
 	Renames     int
 }
 

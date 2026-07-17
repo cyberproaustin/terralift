@@ -150,7 +150,8 @@ provider "google" {
 		Mode: mode,
 		Containers: []provider.ContainerExport{{
 			Container: run.Scope.ID, Dir: dir, MappedIDs: mapped,
-			ExcludedIDs: excluded, GapIDs: gap, AddressByID: addrByID, Renames: len(items),
+			ExcludedIDs: excluded, GapIDs: gap, AddressByID: addrByID,
+			ConfigFiles: []string{"generated.tf"}, Renames: len(items),
 		}},
 	}, nil
 }

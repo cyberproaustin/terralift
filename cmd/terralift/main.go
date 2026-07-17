@@ -18,8 +18,10 @@ import (
 	"github.com/cyberproaustin/terralift/internal/model"
 	"github.com/cyberproaustin/terralift/internal/pipeline"
 	"github.com/cyberproaustin/terralift/internal/provider"
+	"github.com/cyberproaustin/terralift/internal/util"
 
 	// Blank imports register each cloud provider via its init().
+	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 )
 
@@ -32,6 +34,7 @@ func main() {
 	hclOnly := flag.Bool("hcl-only", false, "generate HCL only; no state/import")
 	migration := flag.Bool("migration", false, "clone mode: re-targetable HCL for a new scope (implies hcl-only)")
 	dryRun := flag.Bool("dry-run", false, "detect and report only; make no changes")
+	resourceGroups := flag.String("resource-groups", "", "restrict the run to these containers/resource groups (comma-separated); empty = all")
 	verbosity := flag.String("verbosity", "info", "debug|verbose|info|warn|error")
 	flag.Parse()
 
@@ -46,6 +49,7 @@ func main() {
 	cfg := core.DefaultConfig()
 	cfg.Migration = *migration
 	cfg.HCLOnly = *hclOnly || *migration
+	cfg.Containers = util.SplitCSV([]string{*resourceGroups})
 
 	run := &core.Run{
 		ID:     core.NewRunID(time.Now()),
@@ -70,7 +74,7 @@ func main() {
 // (provider-agnostic) reconcile/correctness/package layer. Skeleton: provider
 // methods return "not implemented" until the milestones fill them in.
 func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
-	var inv *model.Inventory        // carried from Phase 2 into later phases
+	var inv *model.Inventory          // carried from Phase 2 into later phases
 	var export *provider.ExportResult // carried from Phase 3 into Phase 4
 	for _, n := range phases {
 		switch n {

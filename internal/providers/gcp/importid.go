@@ -1,6 +1,10 @@
 package gcp
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/cyberproaustin/terralift/internal/util"
+)
 
 // importIDOverride handles types whose Terraform import ID is NOT the plain CAI
 // asset-name path. Most google_* types accept the path after
@@ -51,8 +55,4 @@ func projectSlashName(caiName, _ string) string {
 
 // escapeHCLTemplate neutralizes Terraform template markers so a value written
 // into a double-quoted HCL string is treated literally.
-func escapeHCLTemplate(s string) string {
-	s = strings.ReplaceAll(s, "${", "$${")
-	s = strings.ReplaceAll(s, "%{", "%%{")
-	return s
-}
+func escapeHCLTemplate(s string) string { return util.EscapeHCLTemplate(s) }

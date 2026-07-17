@@ -21,6 +21,17 @@ func SplitCSV(values []string) []string {
 	return out
 }
 
+// EscapeHCLTemplate neutralizes Terraform template markers so an untrusted value
+// (e.g. an Azure custom-role display name) written into a double-quoted HCL string
+// is treated as a literal, not evaluated as `${...}` interpolation or `%{...}`
+// directive. Go's %q does NOT escape these. Apply before %q — %q leaves the added
+// `$`/`%` untouched.
+func EscapeHCLTemplate(s string) string {
+	s = strings.ReplaceAll(s, "${", "$${")
+	s = strings.ReplaceAll(s, "%{", "%%{")
+	return s
+}
+
 var (
 	pathSep  = regexp.MustCompile(`[\\/:*?"<>|]`)
 	traverse = regexp.MustCompile(`\.\.+`)

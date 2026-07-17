@@ -26,6 +26,7 @@ type Config struct {
 	HCLOnly             bool
 	Migration           bool
 	ResourceTypeExclude []string
+	Containers          []string // restrict the run to these containers (Azure resource groups); empty = all
 	Provider            map[string]any
 }
 
