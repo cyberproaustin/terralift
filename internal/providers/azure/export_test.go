@@ -14,9 +14,10 @@ func TestExcludedReason(t *testing.T) {
 		"azurerm_key_vault_secret", "azurerm_key_vault_key", "azurerm_key_vault_certificate",
 		"azurerm_storage_blob", "azurerm_storage_container", "azurerm_storage_queue",
 		"azurerm_storage_table", "azurerm_storage_share",
+		"azurerm_automation_module", "azurerm_log_analytics_workspace_table_custom_log",
 	} {
-		if excludedReason(tp) == "" {
-			t.Errorf("%s should be excluded (data-plane)", tp)
+		if excludedReason(tp, "") == "" {
+			t.Errorf("%s should be excluded (data-plane/built-in)", tp)
 		}
 	}
 	// Control-plane resources must NOT be excluded.
@@ -24,9 +25,18 @@ func TestExcludedReason(t *testing.T) {
 		"azurerm_storage_account", "azurerm_key_vault", "azurerm_resource_group",
 		"azurerm_virtual_network", "azurerm_linux_web_app",
 	} {
-		if excludedReason(tp) != "" {
+		if excludedReason(tp, "") != "" {
 			t.Errorf("%s should NOT be excluded", tp)
 		}
+	}
+	// $Default consumer group excluded by name; a user consumer group kept.
+	dflt := "/subscriptions/s/resourceGroups/r/providers/Microsoft.EventHub/namespaces/n/eventhubs/h/consumergroups/$Default"
+	if excludedReason("azurerm_eventhub_consumer_group", dflt) == "" {
+		t.Error("$Default consumer group should be excluded")
+	}
+	user := "/subscriptions/s/resourceGroups/r/providers/Microsoft.EventHub/namespaces/n/eventhubs/h/consumergroups/my-cg"
+	if excludedReason("azurerm_eventhub_consumer_group", user) != "" {
+		t.Error("user consumer group should NOT be excluded")
 	}
 }
 

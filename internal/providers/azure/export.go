@@ -107,7 +107,7 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 	var excluded []string
 	for _, k := range keys {
 		e := m[k]
-		if reason := excludedReason(e.ResourceType); reason != "" {
+		if reason := excludedReason(e.ResourceType, k); reason != "" {
 			excluded = append(excluded, k)
 			delete(m, k) // aztfexport map only touches what remains in the mapping
 			continue
@@ -199,7 +199,14 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 // SECURITY control for the control-plane-only mandate (aztfexport would otherwise
 // read secret values / require data-plane keys), reported as ExcludedIDs (an
 // intentional skip) rather than a coverage gap.
-func excludedReason(tfType string) string {
+func excludedReason(tfType, resourceID string) string {
+	// The "$Default" consumer group is auto-created with every Event Hub and can't
+	// be created (its name is reserved), so importing it produces HCL that fails
+	// validation. User consumer groups (any other name) are kept.
+	if tfType == "azurerm_eventhub_consumer_group" &&
+		strings.Contains(strings.ToLower(resourceID), "/consumergroups/$default") {
+		return "Azure built-in $Default consumer group"
+	}
 	switch tfType {
 	case "azurerm_key_vault_secret",
 		"azurerm_key_vault_key",
@@ -218,6 +225,16 @@ func excludedReason(tfType string) string {
 		"azurerm_storage_data_lake_gen2_filesystem",
 		"azurerm_storage_data_lake_gen2_path":
 		return "data-plane: storage content"
+	case // Azure-provisioned built-in child resources aztfexport over-discovers
+		// (hundreds ship with the parent) — never user onboarding targets.
+		"azurerm_automation_module",
+		"azurerm_automation_powershell72_module",
+		"azurerm_automation_connection_type",
+		"azurerm_automation_runtime_environment",
+		"azurerm_log_analytics_workspace_table_custom_log",
+		"azurerm_log_analytics_saved_search",
+		"azurerm_container_registry_scope_map":
+		return "Azure-managed built-in child resource"
 	}
 	return ""
 }
