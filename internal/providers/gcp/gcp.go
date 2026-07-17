@@ -34,9 +34,9 @@ func (p *Provider) Connect(ctx context.Context, run *core.Run) (*provider.AuthCo
 }
 
 func (p *Provider) Enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
-	// M2: search-all-resources --read-mask="*" (floor+truth), search-all-iam-policies
-	// (hierarchy-aware IAM join), org-policy + public-exposure enrichers -> Inventory.
-	return nil, notImplemented("Enumerate")
+	// search-all-resources --read-mask="*" (floor+truth in one), search-all-iam-policies
+	// (IAM join), + public-exposure enrichers -> cloud-neutral Inventory.
+	return enumerate(ctx, run)
 }
 
 func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider.ExportResult, error) {

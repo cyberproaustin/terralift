@@ -32,6 +32,7 @@ type Inventory struct {
 	Resources   map[string]*Resource  `json:"resources"`  // keyed by lower-cased canonical ID
 	Containers  map[string]*Container `json:"containers"` // projects / resource groups / accounts
 	Hierarchy   []*HierarchyNode      `json:"hierarchy"`  // org/folder/project (GCP) or MG tree (Azure)
+	IAM         []IAMBinding          `json:"iam,omitempty"` // all bindings (direct + container-inherited) for the hygiene report
 	Counts      Counts                `json:"counts"`
 }
 
