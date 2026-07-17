@@ -60,6 +60,9 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 	mapped, unmapped := 0, 0
 	for _, r := range results {
 		res := caiToResource(r)
+		if res.ID == "" { // guard: a blank asset name would collide on the "" key
+			continue
+		}
 		if res.TFType == "" {
 			unmapped++
 		} else {
@@ -135,11 +138,15 @@ func enrichIAM(ctx context.Context, scope string, inv *model.Inventory, run *cor
 			}
 		}
 	}
+	// Attach only RESOURCE-scoped bindings per resource. Container-scoped
+	// (project/folder/org) bindings live at the inventory level (inv.IAM) with
+	// their real Scope + Inherited flag, so consumers can resolve ancestry
+	// correctly — attaching all container bindings to every resource would be
+	// wrong for folder/org scope and needlessly bloat the inventory.
 	for id, res := range inv.Resources {
 		res.IAM = append(res.IAM, direct[id]...)
-		res.IAM = append(res.IAM, inherited...) // single-scope: everything inherits container bindings
 	}
-	run.Log.Info("Enumerate", "IAM: %d bindings (%d container-inherited)", len(inv.IAM), len(inherited))
+	run.Log.Info("Enumerate", "IAM: %d bindings (%d container-scoped)", len(inv.IAM), len(inherited))
 	return nil
 }
 
@@ -155,13 +162,21 @@ func enrichExposure(inv *model.Inventory, run *core.Run) {
 				e.Notes = append(e.Notes, "public IAM member ("+b.PrincipalID+")")
 			}
 		}
-		// Firewall allowing 0.0.0.0/0 ingress.
+		// Firewall allowing world ingress. Only an ENABLED, INGRESS, ALLOW rule
+		// with an open source range is exposure — a disabled rule or a DENY from
+		// 0.0.0.0/0 (a protection) is not.
 		if res.NativeType == "compute.googleapis.com/Firewall" {
-			if ranges, ok := res.Properties["sourceRanges"].([]any); ok {
-				for _, rr := range ranges {
-					if fmt.Sprint(rr) == "0.0.0.0/0" {
-						e.IsPubliclyExposed = true
-						e.Notes = append(e.Notes, "firewall 0.0.0.0/0 ingress")
+			disabled, _ := res.Properties["disabled"].(bool)
+			direction, _ := res.Properties["direction"].(string)
+			_, hasAllow := res.Properties["allowed"]
+			ingress := direction == "" || strings.EqualFold(direction, "INGRESS")
+			if !disabled && hasAllow && ingress {
+				if ranges, ok := res.Properties["sourceRanges"].([]any); ok {
+					for _, rr := range ranges {
+						if s := fmt.Sprint(rr); s == "0.0.0.0/0" || s == "::/0" {
+							e.IsPubliclyExposed = true
+							e.Notes = append(e.Notes, "firewall "+s+" ingress")
+						}
 					}
 				}
 			}

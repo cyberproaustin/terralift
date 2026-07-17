@@ -10,7 +10,7 @@ import (
 
 // HygieneFinding is one lockdown item.
 type HygieneFinding struct {
-	Kind     string `json:"kind"` // privileged-human | public-exposure
+	Kind     string `json:"kind"` // privileged-human | public-exposure | public-iam-scope
 	Detail   string `json:"detail"`
 	Resource string `json:"resource"`
 }
@@ -25,28 +25,47 @@ type HygieneReport struct {
 }
 
 // Hygiene derives the lockdown report from the inventory's IAM + exposure.
-// Cloud-agnostic: reads model.IAMBinding.Privileged / PrincipalType and
-// model.Exposure, which each provider populates in its own terms.
+// Deterministic (sorted) so re-runs diff cleanly. Catches container-scoped public
+// grants (project/folder/org allUsers) that per-resource exposure can't see.
 func Hygiene(inv *model.Inventory) HygieneReport {
 	rep := HygieneReport{}
-	seen := map[string]bool{}
-	for _, b := range inv.IAM {
-		if !b.Privileged {
-			continue
+
+	bindings := append([]model.IAMBinding(nil), inv.IAM...)
+	sort.Slice(bindings, func(i, j int) bool {
+		a, b := bindings[i], bindings[j]
+		if a.Scope != b.Scope {
+			return a.Scope < b.Scope
 		}
-		key := b.PrincipalID + "|" + b.Role + "|" + b.Scope
-		if seen[key] {
-			continue
+		if a.Role != b.Role {
+			return a.Role < b.Role
 		}
-		seen[key] = true
-		rep.PrivilegedBindings++
-		if b.PrincipalType == "User" {
-			rep.HumanPrivileged++
+		return a.PrincipalID < b.PrincipalID
+	})
+	seenPriv := map[string]bool{}
+	for _, b := range bindings {
+		if b.Privileged {
+			key := b.PrincipalID + "|" + b.Role + "|" + b.Scope
+			if !seenPriv[key] {
+				seenPriv[key] = true
+				rep.PrivilegedBindings++
+				if b.PrincipalType == "User" {
+					rep.HumanPrivileged++
+					rep.Findings = append(rep.Findings, HygieneFinding{
+						Kind: "privileged-human", Detail: b.Role + " -> " + b.PrincipalID, Resource: b.Scope,
+					})
+				}
+			}
+		}
+		// Container-scoped public grant (project/folder/org allUsers) — per-resource
+		// exposure can't observe this, so surface it here.
+		if b.Inherited && b.PrincipalType == "Public" {
 			rep.Findings = append(rep.Findings, HygieneFinding{
-				Kind: "privileged-human", Detail: b.Role + " -> " + b.PrincipalID, Resource: b.Scope,
+				Kind: "public-iam-scope", Detail: b.Role + " -> " + b.PrincipalID, Resource: b.Scope,
 			})
 		}
 	}
+
+	// Resource-level exposure (allUsers on a resource, open firewall, ...), sorted.
 	ids := make([]string, 0, len(inv.Resources))
 	for id := range inv.Resources {
 		ids = append(ids, id)
@@ -61,6 +80,7 @@ func Hygiene(inv *model.Inventory) HygieneReport {
 			})
 		}
 	}
+
 	if rep.HumanPrivileged > 0 {
 		rep.Actions = append(rep.Actions, fmt.Sprintf("Demote %d human privileged binding(s) to a read role; let the pipeline identity own changes.", rep.HumanPrivileged))
 	}

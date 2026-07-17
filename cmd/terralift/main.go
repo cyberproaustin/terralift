@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -85,12 +86,11 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			run.Log.Info("Enumerate", "=== Phase 2 Enumerate ===")
 			got, err := p.Enumerate(ctx, run)
 			if err != nil {
-				run.Log.Warn("Enumerate", "%v", err)
-				break
+				return fmt.Errorf("phase 2 enumerate: %w", err) // fatal: never proceed on empty inventory
 			}
 			inv = got
 			if err := core.WriteJSON(run.Paths.Inventory, inv); err != nil {
-				run.Log.Warn("Enumerate", "write inventory: %v", err)
+				return fmt.Errorf("write inventory: %w", err)
 			}
 			run.Log.Info("Enumerate", "inventory: %d resources -> %s", inv.Counts.Resources, run.Paths.Inventory)
 		case 3:
@@ -98,37 +98,35 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			if inv == nil { // Phase 3 run alone: load the persisted inventory
 				inv = &model.Inventory{}
 				if err := core.ReadJSON(run.Paths.Inventory, inv); err != nil {
-					run.Log.Warn("Export", "no inventory (run Phase 2 first): %v", err)
-					break
+					return fmt.Errorf("no inventory (run Phase 2 first): %w", err)
 				}
 			}
 			res, err := p.Export(ctx, run, inv)
 			if err != nil {
-				run.Log.Warn("Export", "%v", err)
-				break
+				return fmt.Errorf("phase 3 export: %w", err)
 			}
 			export = res
 			for _, c := range res.Containers {
-				run.Log.Info("Export", "container %s: %d mapped, %d unmapped (mode=%s)", c.Container, len(c.MappedIDs), len(c.UnmappedIDs), res.Mode)
+				run.Log.Info("Export", "container %s: %d mapped, %d excluded, %d gap (mode=%s)",
+					c.Container, len(c.MappedIDs), len(c.ExcludedIDs), len(c.GapIDs), res.Mode)
 			}
 		case 4:
 			run.Log.Info("Reconcile", "=== Phase 4 Reconcile ===")
 			if inv == nil || export == nil {
-				run.Log.Warn("Reconcile", "need Phase 2+3 output in-process; run 2,3,4 together")
-				break
+				return fmt.Errorf("phase 4 needs Phase 2+3 output in-process; run 2,3,4 together")
 			}
 			if err := pipeline.Reconcile(run, inv, export, p.Templates()); err != nil {
-				run.Log.Warn("Reconcile", "%v", err)
+				return fmt.Errorf("phase 4 reconcile: %w", err)
 			}
 		case 5:
 			run.Log.Info("Correctness", "=== Phase 5 Correctness ===")
 			if err := pipeline.Correctness(ctx, run); err != nil {
-				run.Log.Warn("Correctness", "%v", err)
+				return fmt.Errorf("phase 5 correctness: %w", err)
 			}
 		case 6:
 			run.Log.Info("Package", "=== Phase 6 Package ===")
 			if _, err := pipeline.Package(run); err != nil {
-				run.Log.Warn("Package", "%v", err)
+				return fmt.Errorf("phase 6 package: %w", err)
 			}
 		default:
 			run.Log.Warn("", "unknown phase %d, skipping", n)

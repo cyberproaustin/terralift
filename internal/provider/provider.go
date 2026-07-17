@@ -56,8 +56,10 @@ type ExportResult struct {
 type ContainerExport struct {
 	Container   string
 	Dir         string
-	MappedIDs   []string
-	UnmappedIDs []string
+	MappedIDs   []string          // exported (import blocks written)
+	ExcludedIDs []string          // intentionally skipped: managed/default/sub-resource/noise
+	GapIDs      []string          // genuinely unsupported types (no TF mapping)
+	AddressByID map[string]string // canonical resource id -> tf address (for reference rewire)
 	Renames     int
 }
 
