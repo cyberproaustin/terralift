@@ -99,7 +99,7 @@ provider "google" {
 `, run.Scope.ID)
 	_ = os.WriteFile(filepath.Join(dir, "providers.tf"), []byte(prov), 0o644)
 
-	run.Log.Info("Export", "%d import blocks (%d excluded, %d gap) -> %s", len(items), len(excluded), len(gap), dir)
+	run.Log.Info("Export", "%d resource import blocks (%d excluded, %d gap) -> %s", len(items), len(excluded), len(gap), dir)
 
 	mode := "import"
 	if run.Config.HCLOnly {
@@ -128,6 +128,18 @@ provider "google" {
 			run.Log.Warn("Export", "generate-config-out produced no HCL: %v", genErr)
 			run.Log.Verbose("Export", "%s", tail(out, 30))
 		}
+	}
+
+	// --- user IAM bindings (authored directly; written AFTER generate-config-out
+	// so the IAM import blocks don't interfere with the resource config gen) ---
+	iamHCL, iamImports, iamN := generateIAM(inv, addrByID)
+	if iamN > 0 {
+		_ = os.WriteFile(filepath.Join(dir, "iam.tf"), []byte(iamHCL), 0o644)
+		if fh, err := os.OpenFile(filepath.Join(dir, "import.tf"), os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			_, _ = fh.WriteString(iamImports)
+			_ = fh.Close()
+		}
+		run.Log.Info("Export", "%d user IAM binding(s) -> iam.tf", iamN)
 	}
 
 	mapped := make([]string, len(items))
@@ -200,10 +212,11 @@ func notImportable(r *model.Resource) bool {
 	return false
 }
 
-// scrubGeneratedHCL blanks out sensitive-looking string attributes that
-// -generate-config-out can emit in plaintext. Treats generated config as
-// untrusted; returns how many attributes it scrubbed.
-var sensitiveAttr = regexp.MustCompile(`(?i)^(\s*)([a-z0-9_]*(secret|password|passphrase|private_key|client_key|token|credential|access_key|connection_string|cert|auth)[a-z0-9_]*)(\s*)=(\s*)(".*"|<<.*)(.*)$`)
+// scrubGeneratedHCL blanks out sensitive VALUE attributes that
+// -generate-config-out can emit in plaintext. Matched by EXACT attribute name
+// (a payload field), NOT any name merely containing a keyword — matching by
+// substring wrongly blanks control-plane fields like secret_id / kms_key_name.
+var sensitiveAttr = regexp.MustCompile(`(?i)^(\s*)(secret_data|password|passphrase|private_key|private_key_pem|client_secret|client_key|access_token|auth_token|sas_token|connection_string|service_account_key|credentials|private_key_id)(\s*)=(\s*)(".*"|<<.*)(.*)$`)
 
 func scrubGeneratedHCL(path string) int {
 	data, err := os.ReadFile(path)
@@ -231,6 +244,12 @@ func scrubGeneratedHCL(path string) int {
 // lets the provider apply its real defaults — the resource is reproduced faithfully.
 var emptyAttr = regexp.MustCompile(`^\s*[A-Za-z0-9_]+\s*=\s*(null|\[\]|\{\}|0)\s*$`)
 
+// overEmitAttr matches google-provider attributes that -generate-config-out emits
+// with default values that are INVALID in the resource's actual mode (e.g.
+// bgp_always_compare_med is rejected under the default LEGACY best-path mode).
+// Dropping them lets the provider apply the correct default.
+var overEmitAttr = regexp.MustCompile(`^\s*(bgp_always_compare_med|delete_bgp_always_compare_med)\s*=`)
+
 func pruneGeneratedHCL(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -240,7 +259,7 @@ func pruneGeneratedHCL(path string) int {
 	out := make([]string, 0, len(lines))
 	n := 0
 	for _, l := range lines {
-		if emptyAttr.MatchString(l) {
+		if emptyAttr.MatchString(l) || overEmitAttr.MatchString(l) {
 			n++
 			continue
 		}
