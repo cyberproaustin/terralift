@@ -83,8 +83,10 @@ func caiToResource(r caiResource) *model.Resource {
 	if len(r.VersionedResources) > 0 {
 		props = r.VersionedResources[0].Resource
 	}
+	// Prefer a clean displayName, but many types (pubsub, secret) set it to the
+	// full resource path — fall back to the last path segment in that case.
 	name := r.DisplayName
-	if name == "" {
+	if name == "" || strings.Contains(name, "/") {
 		name = r.Name[strings.LastIndex(r.Name, "/")+1:]
 	}
 	return &model.Resource{

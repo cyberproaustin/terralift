@@ -69,6 +69,7 @@ func main() {
 // (provider-agnostic) reconcile/correctness/package layer. Skeleton: provider
 // methods return "not implemented" until the milestones fill them in.
 func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
+	var inv *model.Inventory // carried from Phase 2 to Phase 3 in-process
 	for _, n := range phases {
 		switch n {
 		case 1:
@@ -81,19 +82,32 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			}
 		case 2:
 			run.Log.Info("Enumerate", "=== Phase 2 Enumerate ===")
-			inv, err := p.Enumerate(ctx, run)
+			got, err := p.Enumerate(ctx, run)
 			if err != nil {
 				run.Log.Warn("Enumerate", "%v", err)
 				break
 			}
+			inv = got
 			if err := core.WriteJSON(run.Paths.Inventory, inv); err != nil {
 				run.Log.Warn("Enumerate", "write inventory: %v", err)
 			}
 			run.Log.Info("Enumerate", "inventory: %d resources -> %s", inv.Counts.Resources, run.Paths.Inventory)
 		case 3:
 			run.Log.Info("Export", "=== Phase 3 Export ===")
-			if _, err := p.Export(ctx, run, nil); err != nil {
+			if inv == nil { // Phase 3 run alone: load the persisted inventory
+				inv = &model.Inventory{}
+				if err := core.ReadJSON(run.Paths.Inventory, inv); err != nil {
+					run.Log.Warn("Export", "no inventory (run Phase 2 first): %v", err)
+					break
+				}
+			}
+			res, err := p.Export(ctx, run, inv)
+			if err != nil {
 				run.Log.Warn("Export", "%v", err)
+				break
+			}
+			for _, c := range res.Containers {
+				run.Log.Info("Export", "container %s: %d mapped, %d unmapped (mode=%s)", c.Container, len(c.MappedIDs), len(c.UnmappedIDs), res.Mode)
 			}
 		case 4, 5, 6:
 			run.Log.Info(fmt.Sprintf("Phase%d", n), "=== Phase %d (shared, cloud-agnostic) — not implemented yet ===", n)

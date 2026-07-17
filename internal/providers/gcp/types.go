@@ -21,7 +21,9 @@ var assetTypeToTF = map[string]string{
 	"compute.googleapis.com/Subnetwork":            "google_compute_subnetwork",
 	"compute.googleapis.com/Firewall":              "google_compute_firewall",
 	"compute.googleapis.com/Instance":              "google_compute_instance",
-	"compute.googleapis.com/Route":                 "google_compute_route",
+	// Route intentionally unmapped: GCP auto-creates default/peering routes that
+	// are not typical import targets (they regenerate). Add back behind a config
+	// toggle if a user manages custom routes.
 	"compute.googleapis.com/Address":               "google_compute_address",
 	"compute.googleapis.com/Disk":                  "google_compute_disk",
 	"sqladmin.googleapis.com/Instance":             "google_sql_database_instance",
