@@ -21,6 +21,7 @@ import (
 	"github.com/cyberproaustin/terralift/internal/util"
 
 	// Blank imports register each cloud provider via its init().
+	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
 	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 )

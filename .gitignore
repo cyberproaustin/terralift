@@ -10,3 +10,6 @@ artifacts/
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+
+# generated build/seed artifacts
+*.zip

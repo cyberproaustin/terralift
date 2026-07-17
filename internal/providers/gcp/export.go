@@ -228,7 +228,7 @@ func scrubGeneratedHCL(path string) int {
 	n := 0
 	for i, l := range lines {
 		if m := sensitiveAttr.FindStringSubmatch(l); m != nil {
-			lines[i] = m[1] + m[2] + m[4] + "=" + m[5] + `"" # TerraLift: scrubbed sensitive value` + m[7]
+			lines[i] = m[1] + m[2] + m[3] + "=" + m[4] + `"" # TerraLift: scrubbed sensitive value`
 			n++
 		}
 	}
