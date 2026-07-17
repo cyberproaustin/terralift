@@ -170,6 +170,13 @@ func excludedReason(r *model.Resource) string {
 		return "compute project metadata"
 	case "secretmanager.googleapis.com/SecretVersion":
 		return "secret version (data-plane sub-resource)"
+	case "cloudkms.googleapis.com/CryptoKeyVersion":
+		return "crypto key version (auto-created sub-resource)"
+	case "dns.googleapis.com/ResourceRecordSet":
+		// The google_dns_record_set import id is {{project}}/{{zone}}/{{name}}/{{type}}
+		// but the CAI name carries the numeric zone id, not the zone NAME, so a
+		// correct import id can't be derived. Onboard records via their managed zone.
+		return "dns record set (import id needs zone name; not derivable from CAI)"
 	case "compute.googleapis.com/Route":
 		return "auto-created route"
 	case "cloudresourcemanager.googleapis.com/Project":
