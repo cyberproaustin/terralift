@@ -4,3 +4,9 @@ artifacts/
 *.test
 *.out
 .DS_Store
+
+# terraform (seed) state — never commit
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
