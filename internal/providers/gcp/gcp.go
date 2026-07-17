@@ -40,9 +40,9 @@ func (p *Provider) Enumerate(ctx context.Context, run *core.Run) (*model.Invento
 }
 
 func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider.ExportResult, error) {
-	// M3: per-type import-ID table -> author born-correct `import {}` blocks ->
-	// terraform plan -generate-config-out (draft) -> scrub secrets + schema-prune.
-	return nil, notImplemented("Export")
+	// per-type import-ID derivation -> born-correct `import{}` blocks ->
+	// terraform plan -generate-config-out (draft) -> scrub secrets.
+	return export(ctx, run, inv)
 }
 
 func (p *Provider) Templates() provider.ProviderTemplates {
