@@ -81,9 +81,15 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			}
 		case 2:
 			run.Log.Info("Enumerate", "=== Phase 2 Enumerate ===")
-			if _, err := p.Enumerate(ctx, run); err != nil {
+			inv, err := p.Enumerate(ctx, run)
+			if err != nil {
 				run.Log.Warn("Enumerate", "%v", err)
+				break
 			}
+			if err := core.WriteJSON(run.Paths.Inventory, inv); err != nil {
+				run.Log.Warn("Enumerate", "write inventory: %v", err)
+			}
+			run.Log.Info("Enumerate", "inventory: %d resources -> %s", inv.Counts.Resources, run.Paths.Inventory)
 		case 3:
 			run.Log.Info("Export", "=== Phase 3 Export ===")
 			if _, err := p.Export(ctx, run, nil); err != nil {
