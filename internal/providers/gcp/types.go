@@ -34,7 +34,12 @@ var assetTypeToTF = map[string]string{
 	"cloudresourcemanager.googleapis.com/Project":  "google_project",
 }
 
-func tfTypeFor(assetType string) string { return assetTypeToTF[assetType] }
+func tfTypeFor(assetType string) string {
+	if t, ok := assetTypeToTF[assetType]; ok {
+		return t
+	}
+	return assetTypeToTFExtra[assetType] // full native-resource sweep (coverage.go)
+}
 
 // gcpScope renders a model.Scope as a CAI --scope value.
 func gcpScope(s model.Scope) string {

@@ -60,6 +60,7 @@ batches. Verify each wave's files landed BEFORE launching the next wave. Never f
 - AZURE-1 compute/network/storage · AZURE-2 data/analytics · AZURE-3 app/integration/containers · AZURE-4 security/identity/ops/ai/other
 
 **Agent task template (keep it terse — this controls token cost):**
+- **CRITICAL: instruct the agent to do the research ITSELF (WebSearch/WebFetch only) and NOT spawn sub-agents / use the Task or Agent tool.** general-purpose agents can delegate; one did and exited without writing its file (no data lost thanks to the per-file persistence, but it wasted a run). Always include the no-delegation constraint.
 - Give ONE fixed scope: an explicit list of service families. No open-ended "everything."
 - Output = ONLY a markdown table, columns: `| terraform type | native enumerator type | import ID format | notes (gotchas only) |`.
   - AWS native type = Resource Explorer `service:resource`; GCP = CAI `svc.googleapis.com/Kind`; Azure = ARM `Microsoft.X/y`.
