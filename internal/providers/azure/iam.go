@@ -2,6 +2,7 @@ package azure
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -66,12 +67,26 @@ func generateRoleAssignments(inv *model.Inventory, container string, addrByID ma
 		if addr, ok := addrLower[strings.ToLower(b.Scope)]; ok {
 			scopeExpr = addr + ".id"
 		}
+		// Prefer role_definition_name (readable, portable across tenants), but a name
+		// that is still a raw GUID never resolved (e.g. az role-definition read was
+		// denied / a custom role) — role_definition_name can't accept a GUID, so fall
+		// back to the canonical role_definition_id, which azurerm resolves directly.
+		roleField := fmt.Sprintf("role_definition_name = %q", util.EscapeHCLTemplate(b.Role))
+		if isRoleGUID(b.Role) && b.RoleID != "" {
+			roleField = fmt.Sprintf("role_definition_id   = %q", util.EscapeHCLTemplate(b.RoleID))
+		}
 		fmt.Fprintf(&sb, "import {\n  to = azurerm_role_assignment.%s\n  id = %q\n}\n\n", label, util.EscapeHCLTemplate(b.ID))
-		fmt.Fprintf(&sb, "resource \"azurerm_role_assignment\" %q {\n  scope                = %s\n  role_definition_name = %q\n  principal_id         = %q\n}\n\n",
-			label, scopeExpr, util.EscapeHCLTemplate(b.Role), util.EscapeHCLTemplate(b.PrincipalID))
+		fmt.Fprintf(&sb, "resource \"azurerm_role_assignment\" %q {\n  scope                = %s\n  %s\n  principal_id         = %q\n}\n\n",
+			label, scopeExpr, roleField, util.EscapeHCLTemplate(b.PrincipalID))
 	}
 	return sb.String(), len(picked)
 }
+
+// roleGUIDRe matches a bare role-definition GUID (resolveRole's fallback when it
+// can't map the id to a friendly name).
+var roleGUIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func isRoleGUID(s string) bool { return roleGUIDRe.MatchString(s) }
 
 // roleAssignmentName builds a born-correct label from the role name plus a short
 // slice of the assignment's OWN guid. Using the assignment guid (the resource's

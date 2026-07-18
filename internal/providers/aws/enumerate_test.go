@@ -88,3 +88,18 @@ func TestReToResource(t *testing.T) {
 		t.Errorf("source = %q", res.Source)
 	}
 }
+
+func TestLBTypeFromARN(t *testing.T) {
+	cases := map[string]string{
+		"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/my-alb/abc123":  "aws_lb",
+		"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/net/my-nlb/def456":  "aws_lb",
+		"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/gwy/my-gwlb/ghi789": "aws_lb",
+		"arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/my-classic-elb":     "aws_elb",
+		"arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123:loadbalancer/app/g/x": "aws_lb",
+	}
+	for arn, want := range cases {
+		if got := lbTypeFromARN(arn); got != want {
+			t.Errorf("lbTypeFromARN(%q) = %q, want %q", arn, got, want)
+		}
+	}
+}

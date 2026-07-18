@@ -32,22 +32,36 @@ func generateIAM(inv *model.Inventory, addrByID map[string]string) (string, stri
 		if tfType == "" {
 			continue // unsupported scope -> skip (not a hard gap; IAM types grow incrementally)
 		}
+		// CAI scopes carry the project NUMBER, but the config owner references resolve to
+		// the project-ID form (a resource's .id/.name). Normalize the import owner to match,
+		// or the imported binding's owner differs from config and terraform replaces it.
+		if pid := inv.Scope.ID; pid != "" {
+			importOwner = projectNumberPrefix.ReplaceAllString(importOwner, "projects/"+pid+"/")
+			ownerVal = projectNumberPrefix.ReplaceAllString(ownerVal, "projects/"+pid+"/")
+		}
 		key := b.Scope + "|" + b.Role + "|" + b.PrincipalID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 		// Reference the managed owner resource (dependency ordering) when we
-		// exported it; otherwise a quoted literal (e.g. the project itself).
-		ownerExpr := fmt.Sprintf("%q", ownerVal)
+		// exported it; otherwise a quoted literal (e.g. the project itself),
+		// template-escaped for parity with role/member/import-id (defense in depth).
+		ownerExpr := fmt.Sprintf("%q", escapeHCLTemplate(ownerVal))
 		if addr, ok := addrByID[b.Scope]; ok {
 			switch tfType {
 			case "google_storage_bucket_iam_member":
 				ownerExpr = addr + ".name"
 			case "google_service_account_iam_member":
-				ownerExpr = addr + ".email"
+				// service_account_id needs the full resource name
+				// (projects/<p>/serviceAccounts/<email>), which is .name — NOT .email.
+				ownerExpr = addr + ".name"
 			case "google_pubsub_topic_iam_member":
 				ownerExpr = addr + ".id"
+			case "google_secret_manager_secret_iam_member":
+				ownerExpr = addr + ".id" // secret_id = the secret's projects/<p>/secrets/<n> id
+			case "google_kms_crypto_key_iam_member":
+				ownerExpr = addr + ".id" // crypto_key_id = the key's full resource id
 			}
 		}
 		bs = append(bs, binding{
@@ -91,6 +105,12 @@ func iamResourceFor(scope string) (tfType, ownerAttr, ownerVal, importOwner stri
 	case strings.Contains(scope, "//pubsub.googleapis.com/") && strings.Contains(scope, "/topics/"):
 		t := stripService(scope)
 		return "google_pubsub_topic_iam_member", "topic", t, t
+	case strings.Contains(scope, "//secretmanager.googleapis.com/") && strings.Contains(scope, "/secrets/"):
+		s := stripService(scope) // projects/<p>/secrets/<name>
+		return "google_secret_manager_secret_iam_member", "secret_id", s, s
+	case strings.Contains(scope, "//cloudkms.googleapis.com/") && strings.Contains(scope, "/cryptoKeys/"):
+		k := stripService(scope) // projects/<p>/locations/<l>/keyRings/<kr>/cryptoKeys/<ck>
+		return "google_kms_crypto_key_iam_member", "crypto_key_id", k, k
 	}
 	return "", "", "", ""
 }

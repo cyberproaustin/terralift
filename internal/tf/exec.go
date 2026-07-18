@@ -50,3 +50,9 @@ func (r *Runner) Plan(ctx context.Context, outFile string) (string, error) {
 func (r *Runner) ShowJSON(ctx context.Context, planFile string) (string, error) {
 	return r.run(ctx, "show", "-json", planFile)
 }
+
+// Fmt runs `terraform fmt -recursive` to canonically format the generated repo.
+// It needs no init/providers, so it is safe to run on the repo tree directly.
+func (r *Runner) Fmt(ctx context.Context) (string, error) {
+	return r.run(ctx, "fmt", "-recursive", "-no-color")
+}

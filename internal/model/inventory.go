@@ -82,9 +82,10 @@ type HierarchyNode struct {
 type IAMBinding struct {
 	ID            string `json:"id,omitempty"` // native binding id (e.g. Azure roleAssignments/<guid>); import id
 	PrincipalID   string `json:"principalId"`
-	PrincipalType string `json:"principalType"` // User | Group | ServiceAccount/ServicePrincipal
-	Role          string `json:"role"`
-	Scope         string `json:"scope"` // the resource/hierarchy node the grant is attached to
+	PrincipalType string `json:"principalType"`    // User | Group | ServiceAccount/ServicePrincipal
+	Role          string `json:"role"`             // human-readable role name when resolvable, else the raw id/guid
+	RoleID        string `json:"roleId,omitempty"` // canonical role-definition id (Azure: full roleDefinitions/<guid> path) — authoring fallback
+	Scope         string `json:"scope"`            // the resource/hierarchy node the grant is attached to
 	Privileged    bool   `json:"privileged"`
 	Inherited     bool   `json:"inherited"`
 }

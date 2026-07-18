@@ -43,19 +43,16 @@ func (p *Provider) Export(ctx context.Context, run *core.Run, inv *model.Invento
 func (p *Provider) Templates() provider.ProviderTemplates {
 	return provider.ProviderTemplates{
 		MigrationAttrs: map[string]string{
-			"project": "project", "region": "region", "zone": "zone", "location": "location",
+			// NB: `location` is intentionally NOT varized. Resources disagree on its
+			// casing/form (BigQuery multi-region "US-CENTRAL1" vs KMS/AR regional
+			// "us-central1"); collapsing them onto one variable emits an invalid value
+			// for some (e.g. KMS rejects "US-CENTRAL1"). Each keeps its own literal, which
+			// is correct for a same-region clone — the common case.
+			"project": "project", "region": "region", "zone": "zone",
+			// subnetwork_project pins a resource to the source project the same way
+			// `project` does (Shared-VPC / cross-project subnet field); re-target it too.
+			"subnetwork_project": "project",
 		},
-		ProviderTF: `terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 7.0"
-    }
-  }
-}
-
-provider "google" {}
-`,
 		// Keyless remote state: bucket/prefix supplied at init via -backend-config;
 		// auth via ADC / Workload Identity Federation, never a service-account key
 		// (inline creds would leak into .terraform and plan files).

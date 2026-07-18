@@ -14,10 +14,50 @@ import (
 	"strings"
 
 	"github.com/cyberproaustin/terralift/internal/core"
+	"github.com/cyberproaustin/terralift/internal/hcl"
 	"github.com/cyberproaustin/terralift/internal/model"
 	"github.com/cyberproaustin/terralift/internal/naming"
 	"github.com/cyberproaustin/terralift/internal/provider"
 )
+
+// azureSecretAttrs are attribute names that are UNAMBIGUOUSLY a single leaked
+// secret value and are computed/optional — safe to drop entirely (their live
+// value stays unmanaged rather than being overwritten). App configuration
+// (app_settings, connection_string blocks, env vars) is NOT here: it ships and is
+// flagged in reports/secrets-review.md instead.
+var azureSecretAttrs = []string{
+	"primary_access_key", "secondary_access_key",
+	"primary_connection_string", "secondary_connection_string",
+	"primary_blob_connection_string", "secondary_blob_connection_string",
+	"primary_key", "secondary_key",
+	"sas_token", "certificate_password",
+}
+
+// azureRedactRules blank required-settable secret attributes to "" and protect
+// them with ignore_changes, so a later apply won't overwrite the real value with
+// the blank (removing a required attribute would instead break `terraform plan`).
+var azureRedactRules = []hcl.Rule{
+	{Type: "azurerm_mssql_server", Attr: "administrator_login_password", Kind: hcl.Scalar},
+	{Type: "azurerm_postgresql_server", Attr: "administrator_login_password", Kind: hcl.Scalar},
+	{Type: "azurerm_postgresql_flexible_server", Attr: "administrator_password", Kind: hcl.Scalar},
+	{Type: "azurerm_mysql_server", Attr: "administrator_login_password", Kind: hcl.Scalar},
+	{Type: "azurerm_mysql_flexible_server", Attr: "administrator_password", Kind: hcl.Scalar},
+}
+
+// redactGeneratedHCL removes leaked single secrets from aztfexport's main.tf and
+// returns the scrubbed-secret list for the operator-facing redactions report.
+func redactGeneratedHCL(dir string) []hcl.Redaction {
+	p := filepath.Join(dir, "main.tf")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	out, events := hcl.Redact(string(data), azureSecretAttrs, azureRedactRules)
+	if len(events) > 0 {
+		_ = os.WriteFile(p, []byte(out), 0o644)
+	}
+	return events
+}
 
 // mappingEntry is one row of aztfexport's aztfexportResourceMapping.json:
 // the key is the Azure resource id; resource_id is the import id (may alias a
@@ -148,25 +188,38 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 		run.Log.Verbose("Export", "%s", tail(out, 20))
 	}
 
+	// 4b. scrub leaked single secrets from main.tf (app config is left intact — it
+	// ships and is flagged in the secrets review instead).
+	redactions := redactGeneratedHCL(dir)
+	if len(redactions) > 0 {
+		run.Log.Info("Export", "%s: scrubbed %d leaked secret value(s) from main.tf", rg, len(redactions))
+	}
+
 	// 5. reconcile: an address present in the generated HCL was captured; a kept
 	// resource whose address is absent (skipped on read error) is a coverage gap.
 	// AddressByID is built from MAPPED resources only, so reference rewire never
 	// points a literal at a gapped resource that has no block (broken HCL).
 	generated := scanResourceAddrs(dir)
 	var mapped, gaps []string
+	// addrByID (bare "azurerm_x.y") is for RBAC scope resolution, which appends its own
+	// ".id". refByID (full reference expression) is for cross-reference rewiring, whose
+	// contract is the complete expression — Azure cross-refs are all resource ids -> .id.
 	addrByID := make(map[string]string, len(kept)*2)
+	refByID := make(map[string]string, len(kept)*2)
 	for i, k := range kept {
 		if !generated[keptAddr[i]] {
 			gaps = append(gaps, k)
 			continue
 		}
 		mapped = append(mapped, k)
-		addrByID[k] = keptAddr[i] // the Azure resource id as it appears in generated HCL
+		addrByID[k] = keptAddr[i]        // the Azure resource id as it appears in generated HCL
+		refByID[k] = keptAddr[i] + ".id" // full reference for Rewire
 		// The import id may differ from the key (property sub-resources alias a
 		// parent); map it too, but never clobber a primary resource's own address.
 		if rid := m[k].ResourceID; rid != k {
 			if _, taken := addrByID[rid]; !taken {
 				addrByID[rid] = keptAddr[i]
+				refByID[rid] = keptAddr[i] + ".id"
 			}
 		}
 	}
@@ -190,7 +243,8 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 	return &provider.ContainerExport{
 		Container: rg, Dir: dir,
 		MappedIDs: mapped, ExcludedIDs: excluded, GapIDs: gaps,
-		AddressByID: addrByID, ConfigFiles: []string{"main.tf"}, Renames: len(kept),
+		AddressByID: refByID, ConfigFiles: []string{"main.tf"},
+		Redactions: redactions,
 	}, nil
 }
 

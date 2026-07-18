@@ -118,12 +118,14 @@ func enrichIAM(ctx context.Context, sub string, inv *model.Inventory, run *core.
 	directByRes := map[string][]model.IAMBinding{}
 	for _, a := range assignments {
 		scope := str(a["scope"])
-		name, priv := resolveRole(str(a["roleDefinitionId"]), defs)
+		roleDefID := str(a["roleDefinitionId"])
+		name, priv := resolveRole(roleDefID, defs)
 		b := model.IAMBinding{
 			ID:            str(a["id"]),
 			PrincipalID:   str(a["principalId"]),
 			PrincipalType: str(a["principalType"]),
 			Role:          name,
+			RoleID:        roleDefID, // full roleDefinitions/<guid> path — used if name is an unresolved guid
 			Scope:         scope,
 			Privileged:    priv,
 		}

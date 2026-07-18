@@ -40,19 +40,6 @@ func (p *Provider) Templates() provider.ProviderTemplates {
 		MigrationAttrs: map[string]string{
 			"location": "location", "resource_group_name": "resource_group_name",
 		},
-		ProviderTF: `terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.0"
-    }
-  }
-}
-
-provider "azurerm" {
-  features {}
-}
-`,
 		// Remote state on Azure Storage, keyless: OIDC + Entra (use_azuread_auth),
 		// never a storage key (which would leak into .terraform / plan files).
 		BackendTF: `terraform {

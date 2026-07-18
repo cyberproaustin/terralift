@@ -46,12 +46,21 @@ var awsTypeToTF = map[string]string{
 	"ecs:service":    "aws_ecs_service",
 	"ecr:repository": "aws_ecr_repository",
 	"eks:cluster":    "aws_eks_cluster",
-	// edge / lb / dns
-	"elasticloadbalancing:loadbalancer": "aws_lb",
-	"elasticloadbalancing:targetgroup":  "aws_lb_target_group",
-	"cloudfront:distribution":           "aws_cloudfront_distribution",
-	"route53:hostedzone":                "aws_route53_zone",
-	"apigateway:restapis":               "aws_api_gateway_rest_api",
+	// edge / lb / dns. NOTE: for loadbalancer, reToResource resolves aws_lb vs the
+	// Classic aws_elb from the ARN (app/net/gwy => aws_lb), which is authoritative;
+	// these entries are the fallback + the suffixed forms Resource Explorer may report.
+	"elasticloadbalancing:loadbalancer":     "aws_elb", // Classic (bare); v2 via ARN
+	"elasticloadbalancing:loadbalancer/app": "aws_lb",  // ALB
+	"elasticloadbalancing:loadbalancer/net": "aws_lb",  // NLB
+	"elasticloadbalancing:loadbalancer/gwy": "aws_lb",  // GWLB
+	"elasticloadbalancing:targetgroup":      "aws_lb_target_group",
+	"elasticloadbalancing:listener":         "aws_lb_listener",
+	"elasticloadbalancing:listener/app":     "aws_lb_listener",
+	"elasticloadbalancing:listener/net":     "aws_lb_listener",
+	"elasticloadbalancing:listener/gwy":     "aws_lb_listener",
+	"cloudfront:distribution":               "aws_cloudfront_distribution",
+	"route53:hostedzone":                    "aws_route53_zone",
+	"apigateway:restapis":                   "aws_api_gateway_rest_api",
 	// security / ops
 	"iam:role":              "aws_iam_role",
 	"iam:policy":            "aws_iam_policy",

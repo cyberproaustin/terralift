@@ -13,6 +13,7 @@ var assetTypeToTF = map[string]string{
 	"storage.googleapis.com/Bucket":       "google_storage_bucket",
 	"pubsub.googleapis.com/Topic":         "google_pubsub_topic",
 	"pubsub.googleapis.com/Subscription":  "google_pubsub_subscription",
+	"pubsub.googleapis.com/Schema":        "google_pubsub_schema",
 	"bigquery.googleapis.com/Dataset":     "google_bigquery_dataset",
 	"bigquery.googleapis.com/Table":       "google_bigquery_table",
 	"secretmanager.googleapis.com/Secret": "google_secret_manager_secret",

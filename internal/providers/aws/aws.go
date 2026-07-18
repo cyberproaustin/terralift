@@ -42,20 +42,6 @@ func (p *Provider) Templates() provider.ProviderTemplates {
 		MigrationAttrs: map[string]string{
 			"region": "region", "availability_zone": "availability_zone",
 		},
-		ProviderTF: `terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  # region supplied per-stack (var/AWS_REGION); auth flows from the environment
-  # (AWS_* / OIDC role in CI, or the shared config/SSO locally).
-}
-`,
 		// Remote state on S3 with NATIVE locking (use_lockfile, no DynamoDB) and
 		// keyless auth (the workflow assumes an IAM role via OIDC — no keys on disk).
 		BackendTF: `terraform {

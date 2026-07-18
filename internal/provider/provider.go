@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/cyberproaustin/terralift/internal/core"
+	"github.com/cyberproaustin/terralift/internal/hcl"
 	"github.com/cyberproaustin/terralift/internal/model"
 )
 
@@ -49,7 +50,6 @@ type AuthContext struct {
 // ExportResult summarizes per-container export for the reconcile phase.
 type ExportResult struct {
 	Mode       string // "import" | "hcl-only"
-	Simulated  bool
 	Containers []ContainerExport
 }
 
@@ -59,16 +59,17 @@ type ContainerExport struct {
 	MappedIDs   []string          // exported (import blocks written)
 	ExcludedIDs []string          // intentionally skipped: managed/default/sub-resource/noise
 	GapIDs      []string          // genuinely unsupported types (no TF mapping)
-	AddressByID map[string]string // canonical resource id -> tf address (for reference rewire)
+	AddressByID map[string]string // canonical resource id -> FULL tf reference expression (…​.id/.self_link/.email); consumed verbatim by reconcile.Rewire
 	ConfigFiles []string          // generated HCL file names safe to rewire (e.g. generated.tf, main.tf) — NOT import.tf
-	Renames     int
+	Redactions  []hcl.Redaction   // secret values scrubbed from this container (for the operator-facing report)
 }
 
-// ProviderTemplates are the cloud-specific packaging templates.
+// ProviderTemplates are the cloud-specific packaging templates. Each provider
+// authors its own provider block during export (writeProviderTF etc.), so only
+// the backend and CI pipeline are templated here.
 type ProviderTemplates struct {
-	ProviderTF string
-	BackendTF  string
-	Pipeline   string
+	BackendTF string
+	Pipeline  string
 	// MigrationAttrs maps HCL attributes that pin a resource to its source scope
 	// (e.g. location, resource_group_name, project) to the migration variable they
 	// become in clone mode, so generated config re-targets to a new environment.

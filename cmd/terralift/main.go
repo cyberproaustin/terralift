@@ -61,6 +61,14 @@ func main() {
 		Log:    log,
 	}
 	run.Paths = core.NewPaths(*artifact, run.ID)
+	// Create the run root owner-only (0700) up front: generated HCL is written by
+	// terraform/aztfexport at 0644 and redacted a moment later, so an owner-only
+	// parent closes the brief window where another user on a shared host could read
+	// a not-yet-scrubbed file.
+	if err := os.MkdirAll(run.Paths.Root, 0o700); err != nil {
+		log.Error("", "create run dir: %v", err)
+		os.Exit(1)
+	}
 
 	log.Info("", "TerraLift %s | cloud=%s scope=%s/%s hclOnly=%v migration=%v dryRun=%v",
 		run.ID, run.Cloud, run.Scope.Type, run.Scope.ID, cfg.HCLOnly, cfg.Migration, run.DryRun)
@@ -128,7 +136,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			if inv == nil || export == nil {
 				return fmt.Errorf("phase 4 needs Phase 2+3 output in-process; run 2,3,4 together")
 			}
-			if err := pipeline.Reconcile(run, inv, export, p.Templates()); err != nil {
+			if err := pipeline.Reconcile(ctx, run, inv, export, p.Templates()); err != nil {
 				return fmt.Errorf("phase 4 reconcile: %w", err)
 			}
 		case 5:

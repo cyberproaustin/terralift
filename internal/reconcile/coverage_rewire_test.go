@@ -35,7 +35,7 @@ func TestRewire(t *testing.T) {
   # azure_id = //compute.googleapis.com/projects/p/zones/z/instances/i
 }`
 	dict := map[string]string{
-		"//compute.googleapis.com/projects/p/zones/z/instances/i": "google_compute_instance.web",
+		"//compute.googleapis.com/projects/p/zones/z/instances/i": "google_compute_instance.web.id",
 	}
 	out, n := Rewire(hcl, dict)
 	if n != 1 {

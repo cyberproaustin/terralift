@@ -33,6 +33,16 @@ var importIDOverride = map[string]func(r *model.Resource) string{
 	"aws_iam_policy":            byARN,
 	"aws_lb":                    byARN,
 	"aws_lb_target_group":       byARN,
+	"aws_lb_listener":           byARN,
+	"aws_ecs_task_definition":   byARN, // imports by ARN, not the family:revision the ARN's last segment gives
+	// A key pair imports by its NAME, but Resource Explorer reports it by id
+	// (key-…). authorKeyPairs stashes the real KeyName on the resource once fetched.
+	"aws_key_pair": func(r *model.Resource) string {
+		if kn, _ := r.Properties["tl_keyname"].(string); kn != "" {
+			return kn
+		}
+		return arnName(r.ID)
+	},
 
 	// Hierarchical / slashed names — the ARN's last segment truncates them, so
 	// take the resource part (after the 5th ':') and strip the type token,

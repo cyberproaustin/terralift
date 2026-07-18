@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/cyberproaustin/terralift/internal/core"
+	"github.com/cyberproaustin/terralift/internal/hcl"
+	"github.com/cyberproaustin/terralift/internal/provider"
 )
 
 func TestStripBackendBlocks(t *testing.T) {
@@ -123,5 +125,34 @@ func TestOracleStackCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(scratch, "backend.tf")); !os.IsNotExist(err) {
 		t.Error("backend.tf must NOT be copied (oracle plans with local state)")
+	}
+}
+
+func TestCollectRedactionsAndReport(t *testing.T) {
+	export := &provider.ExportResult{Containers: []provider.ContainerExport{
+		{Container: "us-east-1", Redactions: []hcl.Redaction{
+			{Resource: "aws_db_instance", Attr: "password", Action: "removed"},
+		}},
+		{Container: "global", Redactions: []hcl.Redaction{
+			{Resource: "aws_ssm_parameter", Attr: "value", Action: "blanked"},
+		}},
+	}}
+	red := collectRedactions(export)
+	if len(red) != 2 {
+		t.Fatalf("expected 2 redactions, got %d", len(red))
+	}
+	// Stable sort: "global" sorts before "us-east-1".
+	if red[0].Container != "global" {
+		t.Errorf("expected global first, got %q", red[0].Container)
+	}
+	md := redactionsMD(red)
+	for _, want := range []string{"aws_db_instance", "password", "removed", "aws_ssm_parameter", "blanked", "supply"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("redactionsMD missing %q\n%s", want, md)
+		}
+	}
+	// Empty case must reassure, not alarm.
+	if empty := redactionsMD(nil); !strings.Contains(empty, "Nothing was redacted") {
+		t.Errorf("empty redactionsMD wrong:\n%s", empty)
 	}
 }
