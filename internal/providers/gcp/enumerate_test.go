@@ -12,9 +12,9 @@ func TestPrincipalType(t *testing.T) {
 		"allAuthenticatedUsers": "Public",
 		"user:a@b.com":          "User",
 		"serviceAccount:x@y.iam.gserviceaccount.com": "ServiceAccount",
-		"group:g@b.com":                              "Group",
-		"domain:b.com":                               "Domain",
-		"weird":                                      "Unknown",
+		"group:g@b.com": "Group",
+		"domain:b.com":  "Domain",
+		"weird":         "Unknown",
 	}
 	for in, want := range cases {
 		if got := principalType(in); got != want {

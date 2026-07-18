@@ -29,9 +29,9 @@ type Inventory struct {
 	Cloud       string                `json:"cloud"`
 	Scope       Scope                 `json:"scope"`
 	GeneratedAt time.Time             `json:"generatedAt"`
-	Resources   map[string]*Resource  `json:"resources"`  // keyed by lower-cased canonical ID
-	Containers  map[string]*Container `json:"containers"` // projects / resource groups / accounts
-	Hierarchy   []*HierarchyNode      `json:"hierarchy"`  // org/folder/project (GCP) or MG tree (Azure)
+	Resources   map[string]*Resource  `json:"resources"`     // keyed by lower-cased canonical ID
+	Containers  map[string]*Container `json:"containers"`    // projects / resource groups / accounts
+	Hierarchy   []*HierarchyNode      `json:"hierarchy"`     // org/folder/project (GCP) or MG tree (Azure)
 	IAM         []IAMBinding          `json:"iam,omitempty"` // all bindings (direct + container-inherited) for the hygiene report
 	Counts      Counts                `json:"counts"`
 }
@@ -45,7 +45,7 @@ type Counts struct {
 
 // Resource is one control-plane resource in cloud-neutral form.
 type Resource struct {
-	ID         string            `json:"id"`         // canonical cloud ID (Azure resourceId / GCP asset name / AWS ARN)
+	ID         string            `json:"id"` // canonical cloud ID (Azure resourceId / GCP asset name / AWS ARN)
 	Name       string            `json:"name"`
 	NativeType string            `json:"nativeType"` // e.g. compute.googleapis.com/Instance
 	TFType     string            `json:"tfType"`     // e.g. google_compute_instance (filled at export/reconcile)
@@ -80,10 +80,12 @@ type HierarchyNode struct {
 // AWS policy statement. Inherited=true means it came from an ancestor in the
 // hierarchy (GCP org/folder inheritance) rather than being attached directly.
 type IAMBinding struct {
+	ID            string `json:"id,omitempty"` // native binding id (e.g. Azure roleAssignments/<guid>); import id
 	PrincipalID   string `json:"principalId"`
-	PrincipalType string `json:"principalType"` // User | Group | ServiceAccount/ServicePrincipal
-	Role          string `json:"role"`
-	Scope         string `json:"scope"` // the resource/hierarchy node the grant is attached to
+	PrincipalType string `json:"principalType"`    // User | Group | ServiceAccount/ServicePrincipal
+	Role          string `json:"role"`             // human-readable role name when resolvable, else the raw id/guid
+	RoleID        string `json:"roleId,omitempty"` // canonical role-definition id (Azure: full roleDefinitions/<guid> path) — authoring fallback
+	Scope         string `json:"scope"`            // the resource/hierarchy node the grant is attached to
 	Privileged    bool   `json:"privileged"`
 	Inherited     bool   `json:"inherited"`
 }

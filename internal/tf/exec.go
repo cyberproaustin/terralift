@@ -27,6 +27,13 @@ func (r *Runner) Init(ctx context.Context) (string, error) {
 	return r.run(ctx, "init", "-input=false", "-no-color")
 }
 
+// InitLocal initializes with the remote backend skipped (local state). The
+// correctness oracle only needs to plan against reality, not manage remote
+// state, so it must not require the reconciled backend.tf's -backend-config.
+func (r *Runner) InitLocal(ctx context.Context) (string, error) {
+	return r.run(ctx, "init", "-input=false", "-no-color", "-backend=false")
+}
+
 // GenerateConfig runs `terraform plan -generate-config-out=<out>` to draft HCL
 // for the import blocks in the working dir. Config generation is experimental
 // (may over-emit / leak values), so callers curate the output.
@@ -42,4 +49,10 @@ func (r *Runner) Plan(ctx context.Context, outFile string) (string, error) {
 // ShowJSON runs `terraform show -json <plan>` (feeds ParseRoundTrip).
 func (r *Runner) ShowJSON(ctx context.Context, planFile string) (string, error) {
 	return r.run(ctx, "show", "-json", planFile)
+}
+
+// Fmt runs `terraform fmt -recursive` to canonically format the generated repo.
+// It needs no init/providers, so it is safe to run on the repo tree directly.
+func (r *Runner) Fmt(ctx context.Context) (string, error) {
+	return r.run(ctx, "fmt", "-recursive", "-no-color")
 }

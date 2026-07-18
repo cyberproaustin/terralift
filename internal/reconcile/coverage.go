@@ -33,6 +33,13 @@ type CoverageReport struct {
 func Coverage(enumeratedIDs, exportedIDs, excludedIDs []string, meta map[string]MissingResource) CoverageReport {
 	exp := toSet(exportedIDs)
 	excl := toSet(excludedIDs)
+	// Defend the lowercase-key contract locally instead of trusting the caller, so a
+	// mixed-case meta key can't silently drop a gap's Type/Name detail from the report.
+	metaLower := make(map[string]MissingResource, len(meta))
+	for k, v := range meta {
+		metaLower[strings.ToLower(k)] = v
+	}
+	meta = metaLower
 
 	var missing []MissingResource
 	excluded := 0

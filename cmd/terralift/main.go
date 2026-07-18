@@ -18,8 +18,11 @@ import (
 	"github.com/cyberproaustin/terralift/internal/model"
 	"github.com/cyberproaustin/terralift/internal/pipeline"
 	"github.com/cyberproaustin/terralift/internal/provider"
+	"github.com/cyberproaustin/terralift/internal/util"
 
 	// Blank imports register each cloud provider via its init().
+	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
+	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 )
 
@@ -32,6 +35,7 @@ func main() {
 	hclOnly := flag.Bool("hcl-only", false, "generate HCL only; no state/import")
 	migration := flag.Bool("migration", false, "clone mode: re-targetable HCL for a new scope (implies hcl-only)")
 	dryRun := flag.Bool("dry-run", false, "detect and report only; make no changes")
+	resourceGroups := flag.String("resource-groups", "", "restrict the run to these containers/resource groups (comma-separated); empty = all")
 	verbosity := flag.String("verbosity", "info", "debug|verbose|info|warn|error")
 	flag.Parse()
 
@@ -46,6 +50,7 @@ func main() {
 	cfg := core.DefaultConfig()
 	cfg.Migration = *migration
 	cfg.HCLOnly = *hclOnly || *migration
+	cfg.Containers = util.SplitCSV([]string{*resourceGroups})
 
 	run := &core.Run{
 		ID:     core.NewRunID(time.Now()),
@@ -56,6 +61,14 @@ func main() {
 		Log:    log,
 	}
 	run.Paths = core.NewPaths(*artifact, run.ID)
+	// Create the run root owner-only (0700) up front: generated HCL is written by
+	// terraform/aztfexport at 0644 and redacted a moment later, so an owner-only
+	// parent closes the brief window where another user on a shared host could read
+	// a not-yet-scrubbed file.
+	if err := os.MkdirAll(run.Paths.Root, 0o700); err != nil {
+		log.Error("", "create run dir: %v", err)
+		os.Exit(1)
+	}
 
 	log.Info("", "TerraLift %s | cloud=%s scope=%s/%s hclOnly=%v migration=%v dryRun=%v",
 		run.ID, run.Cloud, run.Scope.Type, run.Scope.ID, cfg.HCLOnly, cfg.Migration, run.DryRun)
@@ -67,12 +80,20 @@ func main() {
 }
 
 // runPipeline dispatches phases 1-3 to the cloud provider and 4-6 to the shared
-// (provider-agnostic) reconcile/correctness/package layer. Skeleton: provider
-// methods return "not implemented" until the milestones fill them in.
+// (provider-agnostic) reconcile/correctness/package layer. In --dry-run it detects
+// and reports (phases 1-2 + hygiene) and writes no repo.
 func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
-	var inv *model.Inventory        // carried from Phase 2 into later phases
+	var inv *model.Inventory          // carried from Phase 2 into later phases
 	var export *provider.ExportResult // carried from Phase 3 into Phase 4
 	for _, n := range phases {
+		// Dry-run stops before any generating phase: report from the inventory only.
+		if run.DryRun && n >= 3 {
+			if inv != nil {
+				pipeline.DryReport(run, inv)
+			}
+			run.Log.Info("", "dry-run complete — detection + reports only, no repo written")
+			return nil
+		}
 		switch n {
 		case 1:
 			run.Log.Info("Preflight", "=== Phase 1 Preflight ===")
@@ -115,7 +136,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			if inv == nil || export == nil {
 				return fmt.Errorf("phase 4 needs Phase 2+3 output in-process; run 2,3,4 together")
 			}
-			if err := pipeline.Reconcile(run, inv, export, p.Templates()); err != nil {
+			if err := pipeline.Reconcile(ctx, run, inv, export, p.Templates()); err != nil {
 				return fmt.Errorf("phase 4 reconcile: %w", err)
 			}
 		case 5:
@@ -132,7 +153,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			run.Log.Warn("", "unknown phase %d, skipping", n)
 		}
 	}
-	run.Log.Info("", "skeleton pipeline complete (phase logic pending)")
+	run.Log.Info("", "run complete")
 	return nil
 }
 

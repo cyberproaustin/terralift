@@ -7,10 +7,10 @@ func TestSplitCSV(t *testing.T) {
 		in   []string
 		want int
 	}{
-		{[]string{"rg1", "rg2"}, 2},        // array stays two
-		{[]string{"rg1,rg2"}, 2},           // comma-joined string splits
-		{[]string{"rg1, rg2 ", "rg3"}, 3},  // mixed + trims
-		{[]string{"rg1", "", "  "}, 1},     // drops empties
+		{[]string{"rg1", "rg2"}, 2},       // array stays two
+		{[]string{"rg1,rg2"}, 2},          // comma-joined string splits
+		{[]string{"rg1, rg2 ", "rg3"}, 3}, // mixed + trims
+		{[]string{"rg1", "", "  "}, 1},    // drops empties
 	}
 	for _, c := range cases {
 		if got := len(SplitCSV(c.in)); got != c.want {
@@ -28,6 +28,20 @@ func TestPathSegment(t *testing.T) {
 	for _, c := range cases {
 		if got := PathSegment(c.in); got != c.want {
 			t.Errorf("PathSegment(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestEscapeHCLTemplate(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Reader", "Reader"},                  // no markers -> identity
+		{"Evil ${var.x}", "Evil $${var.x}"},   // interpolation neutralized
+		{"a %{ for x } b", "a %%{ for x } b"}, // directive neutralized
+		{"${a}${b}", "$${a}$${b}"},            // multiple
+	}
+	for _, c := range cases {
+		if got := EscapeHCLTemplate(c.in); got != c.want {
+			t.Errorf("EscapeHCLTemplate(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

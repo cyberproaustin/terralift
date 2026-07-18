@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -92,16 +93,87 @@ func caiToResource(r caiResource) *model.Resource {
 	if name == "" || strings.Contains(name, "/") {
 		name = r.Name[strings.LastIndex(r.Name, "/")+1:]
 	}
+	// A service account's name is its email; use just the account-id (before "@") so
+	// the born-correct label is `tlmega_compute`, not the whole …iam.gserviceaccount.com.
+	if r.AssetType == "iam.googleapis.com/ServiceAccount" {
+		if at := strings.Index(name, "@"); at > 0 {
+			name = name[:at]
+		}
+	}
+	tf := tfTypeFor(r.AssetType)
+	// Several CAI asset types map to DIFFERENT Terraform resources depending on the
+	// resource's scope (global vs regional vs zonal, or project vs billing/folder/org).
+	// CAI reports one asset type for all variants, so resolve the concrete type from
+	// the location / resource name — otherwise generate-config-out is handed the wrong
+	// resource type, its import fails, and the resource is silently dropped to a gap.
+	switch r.AssetType {
+	case "iam.googleapis.com/Role":
+		// project- vs org-scoped custom role — resolve from the resource name.
+		tf = customRoleType(r.Name)
+	case "compute.googleapis.com/ForwardingRule":
+		if strings.EqualFold(r.Location, "global") {
+			tf = "google_compute_global_forwarding_rule"
+		}
+	case "compute.googleapis.com/Address":
+		if strings.EqualFold(r.Location, "global") {
+			tf = "google_compute_global_address"
+		}
+	case "compute.googleapis.com/InstanceGroupManager":
+		if gcpZoneRe.MatchString(r.Location) { // zonal MIG (the type map defaults to the region variant)
+			tf = "google_compute_instance_group_manager"
+		}
+	case "logging.googleapis.com/LogSink":
+		tf = logSinkType(r.Name)
+	case "cloudfunctions.googleapis.com/Function":
+		// 2nd-gen functions (the modern default) are a distinct Terraform resource
+		// from 1st-gen; the type map defaults to gen1. A gen2 function also surfaces
+		// as a run.googleapis.com/Service backing service — excludedReason drops that
+		// twin so the function is managed once, through cloudfunctions2_function.
+		if env, _ := props["environment"].(string); env == "GEN_2" {
+			tf = "google_cloudfunctions2_function"
+		}
+	}
 	return &model.Resource{
 		ID:         r.Name,
 		Name:       name,
 		NativeType: r.AssetType,
-		TFType:     tfTypeFor(r.AssetType),
+		TFType:     tf,
 		Container:  projectID(r.Project),
 		Location:   r.Location,
 		Tags:       r.Labels,
 		Properties: props,
 		Source:     "cai",
+	}
+}
+
+// customRoleType picks the Terraform custom-role resource by the role's scope,
+// read from its CAI resource name (…/projects/… vs …/organizations/…). Folder
+// scope has no custom-role resource in the provider, so it also falls to project.
+func customRoleType(caiName string) string {
+	if strings.Contains(caiName, "/organizations/") {
+		return "google_organization_iam_custom_role"
+	}
+	return "google_project_iam_custom_role"
+}
+
+// gcpZoneRe matches a zone (region + "-" + a single letter, e.g. us-central1-a),
+// distinguishing zonal resources from regional ones (us-central1) by location.
+var gcpZoneRe = regexp.MustCompile(`-[a-z]$`)
+
+// logSinkType resolves a logging sink's Terraform resource from the scope encoded
+// in its CAI resource name. A project sink miswired to google_logging_billing_
+// account_sink imports "cleanly" but carries the project NUMBER as a bogus
+// billing_account and would drive the wrong API on any real change.
+func logSinkType(caiName string) string {
+	switch {
+	case strings.Contains(caiName, "/billingAccounts/"):
+		return "google_logging_billing_account_sink"
+	case strings.Contains(caiName, "/folders/"):
+		return "google_logging_folder_sink"
+	case strings.Contains(caiName, "/organizations/"):
+		return "google_logging_organization_sink"
+	default:
+		return "google_logging_project_sink"
 	}
 }
 

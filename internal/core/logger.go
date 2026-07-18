@@ -57,7 +57,15 @@ func (l *Logger) log(lvl Level, phase, msg string) {
 	fmt.Fprintf(os.Stderr, "%s %-7s %s%s\n", ts, levelTags[lvl], prefix, msg)
 }
 
-func (l *Logger) Verbose(phase, format string, a ...any) { l.log(LevelVerbose, phase, fmt.Sprintf(format, a...)) }
-func (l *Logger) Info(phase, format string, a ...any)    { l.log(LevelInfo, phase, fmt.Sprintf(format, a...)) }
-func (l *Logger) Warn(phase, format string, a ...any)    { l.log(LevelWarn, phase, fmt.Sprintf(format, a...)) }
-func (l *Logger) Error(phase, format string, a ...any)   { l.log(LevelError, phase, fmt.Sprintf(format, a...)) }
+func (l *Logger) Verbose(phase, format string, a ...any) {
+	l.log(LevelVerbose, phase, fmt.Sprintf(format, a...))
+}
+func (l *Logger) Info(phase, format string, a ...any) {
+	l.log(LevelInfo, phase, fmt.Sprintf(format, a...))
+}
+func (l *Logger) Warn(phase, format string, a ...any) {
+	l.log(LevelWarn, phase, fmt.Sprintf(format, a...))
+}
+func (l *Logger) Error(phase, format string, a ...any) {
+	l.log(LevelError, phase, fmt.Sprintf(format, a...))
+}
