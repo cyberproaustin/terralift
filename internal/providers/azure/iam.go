@@ -79,7 +79,7 @@ func generateRoleAssignments(inv *model.Inventory, container string, addrByID ma
 		// segment, but the azurerm provider's import parser is case-sensitive and
 		// requires the canonical "roleAssignments" — normalize it or the import fails
 		// with "the ID was missing the `roleAssignments` element".
-		importID := roleAssignmentSegRe.ReplaceAllString(b.ID, "${1}roleAssignments${2}")
+		importID := roleAssignmentSegRe.ReplaceAllString(b.ID, "/providers/Microsoft.Authorization/roleAssignments/")
 		fmt.Fprintf(&sb, "import {\n  to = azurerm_role_assignment.%s\n  id = %q\n}\n\n", label, util.EscapeHCLTemplate(importID))
 		fmt.Fprintf(&sb, "resource \"azurerm_role_assignment\" %q {\n  scope                = %s\n  %s\n  principal_id         = %q\n}\n\n",
 			label, scopeExpr, roleField, util.EscapeHCLTemplate(b.PrincipalID))
@@ -87,10 +87,11 @@ func generateRoleAssignments(inv *model.Inventory, container string, addrByID ma
 	return sb.String(), len(picked)
 }
 
-// roleAssignmentSegRe matches the "roleAssignments" path segment (any casing) of a
-// role-assignment id, so it can be normalized to the provider's required casing while
-// preserving the Microsoft.Authorization namespace around it.
-var roleAssignmentSegRe = regexp.MustCompile(`(?i)(/providers/Microsoft\.Authorization/)roleAssignments(/)`)
+// roleAssignmentSegRe matches the Microsoft.Authorization/roleAssignments path
+// segment (any casing) of a role-assignment id, so the whole segment can be
+// normalized to the provider's required canonical casing (the azurerm import parser
+// is case-sensitive here). The assignment GUID after it is never in the match.
+var roleAssignmentSegRe = regexp.MustCompile(`(?i)/providers/Microsoft\.Authorization/roleAssignments/`)
 
 // roleGUIDRe matches a bare role-definition GUID (resolveRole's fallback when it
 // can't map the id to a friendly name).

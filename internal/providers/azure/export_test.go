@@ -3,6 +3,7 @@ package azure
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cyberproaustin/terralift/internal/model"
@@ -82,5 +83,78 @@ resource "azurerm_storage_account" "acct" {}
 	}
 	if len(got) != 2 {
 		t.Errorf("scanResourceAddrs found %d, want 2: %v", len(got), got)
+	}
+}
+
+func TestWriteImportBlocksFromState(t *testing.T) {
+	dir := t.TempDir()
+	// A resource "id" with a template marker (must be escaped); a data resource (must
+	// be skipped — never leak data-plane values); a managed resource whose HCL wasn't
+	// authored (must be filtered by `generated`); an empty-id instance (skip); and an
+	// index_key resource (must render the indexed address).
+	state := `{
+	  "resources": [
+	    {"mode":"managed","type":"azurerm_virtual_network","name":"vnet",
+	     "instances":[{"attributes":{"id":"/subs/vnet-${x}","primary_access_key":"SECRET"}}]},
+	    {"mode":"data","type":"azurerm_client_config","name":"cur",
+	     "instances":[{"attributes":{"id":"data-plane-should-not-appear"}}]},
+	    {"mode":"managed","type":"azurerm_orphan","name":"gone",
+	     "instances":[{"attributes":{"id":"/subs/orphan"}}]},
+	    {"mode":"managed","type":"azurerm_noid","name":"noid",
+	     "instances":[{"attributes":{}}]},
+	    {"mode":"managed","type":"azurerm_subnet","name":"snet",
+	     "instances":[{"index_key":"app","attributes":{"id":"/subs/snet-app"}}]}
+	  ]
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "terraform.tfstate"), []byte(state), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	generated := map[string]bool{
+		"azurerm_virtual_network.vnet": true,
+		"azurerm_noid.noid":            true,
+		"azurerm_subnet.snet":          true,
+		// azurerm_orphan.gone intentionally absent -> must be filtered
+	}
+	n, err := writeImportBlocksFromState(dir, generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 { // vnet + snet (data skipped, orphan filtered, noid empty-id skipped)
+		t.Fatalf("count = %d, want 2", n)
+	}
+	out, err := os.ReadFile(filepath.Join(dir, "import.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "to = azurerm_virtual_network.vnet") {
+		t.Errorf("vnet import block missing:\n%s", s)
+	}
+	if !strings.Contains(s, `to = azurerm_subnet.snet["app"]`) {
+		t.Errorf("indexed address not rendered:\n%s", s)
+	}
+	if !strings.Contains(s, `$${x}`) { // template marker escaped
+		t.Errorf("template marker not escaped:\n%s", s)
+	}
+	if strings.Contains(s, "SECRET") || strings.Contains(s, "primary_access_key") {
+		t.Errorf("non-id attribute leaked into import.tf:\n%s", s)
+	}
+	if strings.Contains(s, "data-plane-should-not-appear") {
+		t.Errorf("data resource id leaked:\n%s", s)
+	}
+	if strings.Contains(s, "azurerm_orphan") {
+		t.Errorf("address absent from generated HCL was not filtered:\n%s", s)
+	}
+}
+
+func TestWriteImportBlocksFromStateNoState(t *testing.T) {
+	// Missing state is benign (hcl-only / empty RG) — no error, no file.
+	dir := t.TempDir()
+	n, err := writeImportBlocksFromState(dir, nil)
+	if err != nil || n != 0 {
+		t.Errorf("no-state: n=%d err=%v, want 0/nil", n, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "import.tf")); statErr == nil {
+		t.Error("import.tf written when there was no state")
 	}
 }

@@ -79,3 +79,33 @@ func TestRoleAssignmentName(t *testing.T) {
 		t.Errorf("roleAssignmentName = %q", got)
 	}
 }
+
+func TestRoleAssignmentImportIDCasing(t *testing.T) {
+	const canon = "/providers/Microsoft.Authorization/roleAssignments/"
+	cases := []struct{ name, in, want string }{
+		{"resource-graph casing",
+			"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Authorization/RoleAssignments/abc-123",
+			"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Authorization/roleAssignments/abc-123"},
+		{"already canonical (idempotent)",
+			"/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/abc-123",
+			"/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/abc-123"},
+		{"fully lowercased namespace normalized",
+			"/subscriptions/s/providers/microsoft.authorization/roleassignments/abc-123",
+			"/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/abc-123"},
+	}
+	for _, c := range cases {
+		if got := roleAssignmentSegRe.ReplaceAllString(c.in, canon); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+	// GUID after the segment (the identity) must be preserved untouched.
+	in := "/x/providers/Microsoft.Authorization/RoleAssignments/DEAD-BEEF-Aa"
+	if got := roleAssignmentSegRe.ReplaceAllString(in, canon); !strings.HasSuffix(got, "/roleAssignments/DEAD-BEEF-Aa") {
+		t.Errorf("assignment id altered: %q", got)
+	}
+	// a non-Authorization provider path must be left alone.
+	other := "/x/providers/Microsoft.Storage/storageAccounts/roleAssignments"
+	if got := roleAssignmentSegRe.ReplaceAllString(other, canon); got != other {
+		t.Errorf("unrelated path mangled: %q", got)
+	}
+}

@@ -196,12 +196,18 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 		run.Log.Info("Export", "%s: scrubbed %d leaked secret value(s) from main.tf", rg, len(redactions))
 	}
 
+	// The addresses actually authored in the generated HCL. Computed here (before the
+	// import blocks) so import.tf can be intersected against it: aztfexport runs with
+	// -k (tolerate partial failures), so a resource could land in state but not in the
+	// HCL — an import block for it would fail plan with "import target does not exist".
+	generated := scanResourceAddrs(dir)
+
 	// 4c. born-correct import blocks from aztfexport's state. aztfexport adopts by
 	// importing into a state file, which TerraLift never ships (it holds data-plane
 	// secrets), so without this the shipped repo would CREATE rather than adopt. The
 	// import blocks make `terraform plan` on the repo a clean adoption, matching the
 	// AWS/GCP model. IDs stay literal — import.tf is excluded from reference rewiring.
-	if n, err := writeImportBlocksFromState(dir); err != nil {
+	if n, err := writeImportBlocksFromState(dir, generated); err != nil {
 		run.Log.Warn("Export", "%s: import-block generation failed: %v", rg, err)
 	} else if n > 0 {
 		run.Log.Info("Export", "%s: %d born-correct import block(s) -> import.tf", rg, n)
@@ -211,7 +217,6 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 	// resource whose address is absent (skipped on read error) is a coverage gap.
 	// AddressByID is built from MAPPED resources only, so reference rewire never
 	// points a literal at a gapped resource that has no block (broken HCL).
-	generated := scanResourceAddrs(dir)
 	var mapped, gaps []string
 	// addrByID (bare "azurerm_x.y") is for RBAC scope resolution, which appends its own
 	// ".id". refByID (full reference expression) is for cross-reference rewiring, whose
@@ -263,8 +268,11 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 // writeImportBlocksFromState reads the aztfexport-produced terraform.tfstate and
 // emits one born-correct import block per managed resource instance into import.tf,
 // so the shipped repo adopts on `terraform plan` (aztfexport's state is never shipped).
-// Returns the count written. import.tf is excluded from rewiring, so its ids stay literal.
-func writeImportBlocksFromState(dir string) (int, error) {
+// Only addresses present in `generated` (the authored HCL) get a block — a state
+// address with no resource block would fail plan with "import target does not exist"
+// (possible under aztfexport's -k partial-failure mode). Returns the count written.
+// import.tf is excluded from rewiring, so its ids stay literal.
+func writeImportBlocksFromState(dir string, generated map[string]bool) (int, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "terraform.tfstate"))
 	if err != nil {
 		return 0, nil // no state (e.g. aztfexport produced nothing) — not an error
@@ -296,7 +304,11 @@ func writeImportBlocksFromState(dir string) (int, error) {
 			if id == "" {
 				continue
 			}
-			to := r.Type + "." + r.Name
+			addr := r.Type + "." + r.Name
+			if generated != nil && !generated[addr] {
+				continue // no resource block authored for this address — don't orphan an import
+			}
+			to := addr
 			if inst.IndexKey != nil {
 				switch k := inst.IndexKey.(type) {
 				case string:
@@ -346,6 +358,11 @@ func excludedReason(tfType, resourceID string) string {
 		"azurerm_storage_data_lake_gen2_filesystem",
 		"azurerm_storage_data_lake_gen2_path":
 		return "data-plane: storage content"
+	case "azurerm_role_assignment", "azurerm_role_definition":
+		// RBAC is authored authoritatively by generateRoleAssignments -> roleassignments.tf
+		// (with its own import blocks). Onboarding it here too would double-manage the same
+		// ARM id at two addresses and fail plan. Keep iam.go the single source of truth.
+		return "RBAC (authored in roleassignments.tf)"
 	case // Azure-provisioned built-in child resources aztfexport over-discovers
 		// (hundreds ship with the parent) — never user onboarding targets.
 		"azurerm_automation_module",
