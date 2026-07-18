@@ -75,12 +75,22 @@ func generateRoleAssignments(inv *model.Inventory, container string, addrByID ma
 		if isRoleGUID(b.Role) && b.RoleID != "" {
 			roleField = fmt.Sprintf("role_definition_id   = %q", util.EscapeHCLTemplate(b.RoleID))
 		}
-		fmt.Fprintf(&sb, "import {\n  to = azurerm_role_assignment.%s\n  id = %q\n}\n\n", label, util.EscapeHCLTemplate(b.ID))
+		// Azure Resource Graph returns the assignment id with a "RoleAssignments"
+		// segment, but the azurerm provider's import parser is case-sensitive and
+		// requires the canonical "roleAssignments" — normalize it or the import fails
+		// with "the ID was missing the `roleAssignments` element".
+		importID := roleAssignmentSegRe.ReplaceAllString(b.ID, "${1}roleAssignments${2}")
+		fmt.Fprintf(&sb, "import {\n  to = azurerm_role_assignment.%s\n  id = %q\n}\n\n", label, util.EscapeHCLTemplate(importID))
 		fmt.Fprintf(&sb, "resource \"azurerm_role_assignment\" %q {\n  scope                = %s\n  %s\n  principal_id         = %q\n}\n\n",
 			label, scopeExpr, roleField, util.EscapeHCLTemplate(b.PrincipalID))
 	}
 	return sb.String(), len(picked)
 }
+
+// roleAssignmentSegRe matches the "roleAssignments" path segment (any casing) of a
+// role-assignment id, so it can be normalized to the provider's required casing while
+// preserving the Microsoft.Authorization namespace around it.
+var roleAssignmentSegRe = regexp.MustCompile(`(?i)(/providers/Microsoft\.Authorization/)roleAssignments(/)`)
 
 // roleGUIDRe matches a bare role-definition GUID (resolveRole's fallback when it
 // can't map the id to a friendly name).
