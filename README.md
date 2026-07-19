@@ -34,7 +34,13 @@ You need Go 1.24 or newer.
 go install github.com/cyberproaustin/terralift/cmd/terralift@latest
 ```
 
-That drops a `terralift` binary into `$(go env GOPATH)/bin`. Make sure that directory is on your `PATH`.
+That drops a `terralift` binary into `$(go env GOPATH)/bin`. Make sure that directory is on your `PATH`. `@latest` installs the newest release. To pin a specific version, use its tag:
+
+```
+go install github.com/cyberproaustin/terralift/cmd/terralift@v1.0.0
+```
+
+Either way, `terralift version` reports the version you installed.
 
 To build from a clone instead:
 

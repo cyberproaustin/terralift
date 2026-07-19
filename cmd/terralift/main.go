@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 
@@ -16,8 +17,23 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 )
 
-// version is stamped at build time: -ldflags "-X main.version=v1.0.0".
-var version = "dev"
+// buildVersion is stamped at release build time with
+// -ldflags "-X main.buildVersion=v1.0.0". It is usually empty. version() then reads
+// the module version that Go embeds in the build info, so `go install <pkg>@v1.0.0`
+// reports v1.0.0 with no flags. A plain local build reports "dev".
+var buildVersion = ""
+
+func version() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return "dev"
+}
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -28,7 +44,7 @@ func main() {
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "terralift",
-		Short: "Bring existing cloud infrastructure under Terraform — brownfield to greenfield.",
+		Short: "Bring existing cloud infrastructure under Terraform: brownfield to greenfield.",
 		Long: bannerText(false) + `
 TerraLift onboards live AWS, GCP, and Azure infrastructure into a plan-clean
 Terraform repo: it enumerates what's running, authors born-correct import blocks
@@ -41,7 +57,7 @@ and HCL, reconciles it to a module layout, and verifies the round-trip.
 		// just sets the exit code.
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		Version:       version, // enables --version
+		Version:       version(), // enables --version
 	}
 	root.SetVersionTemplate("terralift {{.Version}}\n")
 	root.AddCommand(onboardCmd(), cloneCmd(), versionCmd(), bannerCmd())
@@ -66,7 +82,7 @@ func versionCmd() *cobra.Command {
 		Short: "Print the TerraLift version.",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, _ []string) {
-			cmd.Printf("terralift %s\n", version)
+			cmd.Printf("terralift %s\n", version())
 		},
 	}
 }
