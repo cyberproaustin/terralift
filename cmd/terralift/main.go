@@ -1,24 +1,14 @@
-// Command terralift is a multi-cloud tool that brings existing cloud
-// infrastructure under Terraform: enumerate -> born-correct export -> reconcile
-// into a plan-clean module repo -> package. This is the CLI entrypoint; it wires
-// flags into a run and dispatches the phase pipeline.
+// Command terralift brings existing cloud infrastructure under Terraform:
+// enumerate -> born-correct export -> reconcile into a plan-clean module repo ->
+// package. Brownfield to greenfield. This file wires the root CLI (cobra); the run
+// commands live in run.go and the phase pipeline in the internal/ packages.
 package main
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"os"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/cyberproaustin/terralift/internal/core"
-	"github.com/cyberproaustin/terralift/internal/model"
-	"github.com/cyberproaustin/terralift/internal/pipeline"
-	"github.com/cyberproaustin/terralift/internal/provider"
-	"github.com/cyberproaustin/terralift/internal/util"
+	"github.com/spf13/cobra"
 
 	// Blank imports register each cloud provider via its init().
 	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
@@ -26,150 +16,57 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 )
 
+// version is stamped at build time: -ldflags "-X main.version=v1.0.0".
+var version = "dev"
+
 func main() {
-	cloud := flag.String("cloud", "gcp", "cloud provider: "+strings.Join(sortedNames(), "|"))
-	scopeType := flag.String("scope-type", "project", "scope type: project|folder|organization|subscription|account")
-	scopeID := flag.String("scope", "", "scope id (project id, folder/org number, subscription id, account id)")
-	artifact := flag.String("artifacts", "artifacts", "artifact output root")
-	phasesArg := flag.String("phases", "1,2,3,4,5,6", "comma-separated phases to run")
-	hclOnly := flag.Bool("hcl-only", false, "generate HCL only; no state/import")
-	migration := flag.Bool("migration", false, "clone mode: re-targetable HCL for a new scope (implies hcl-only)")
-	dryRun := flag.Bool("dry-run", false, "detect and report only; make no changes")
-	resourceGroups := flag.String("resource-groups", "", "restrict the run to these containers/resource groups (comma-separated); empty = all")
-	verbosity := flag.String("verbosity", "info", "debug|verbose|info|warn|error")
-	flag.Parse()
-
-	log := core.NewLogger(core.ParseLevel(*verbosity))
-
-	p, ok := provider.Get(*cloud)
-	if !ok {
-		log.Error("", "unknown cloud %q (registered: %s)", *cloud, strings.Join(sortedNames(), ", "))
-		os.Exit(2)
-	}
-
-	cfg := core.DefaultConfig()
-	cfg.Migration = *migration
-	cfg.HCLOnly = *hclOnly || *migration
-	cfg.Containers = util.SplitCSV([]string{*resourceGroups})
-
-	run := &core.Run{
-		ID:     core.NewRunID(time.Now()),
-		Cloud:  *cloud,
-		Scope:  model.Scope{Type: model.ScopeType(*scopeType), ID: *scopeID},
-		Config: cfg,
-		DryRun: *dryRun,
-		Log:    log,
-	}
-	run.Paths = core.NewPaths(*artifact, run.ID)
-	// Create the run root owner-only (0700) up front: generated HCL is written by
-	// terraform/aztfexport at 0644 and redacted a moment later, so an owner-only
-	// parent closes the brief window where another user on a shared host could read
-	// a not-yet-scrubbed file.
-	if err := os.MkdirAll(run.Paths.Root, 0o700); err != nil {
-		log.Error("", "create run dir: %v", err)
-		os.Exit(1)
-	}
-
-	log.Info("", "TerraLift %s | cloud=%s scope=%s/%s hclOnly=%v migration=%v dryRun=%v",
-		run.ID, run.Cloud, run.Scope.Type, run.Scope.ID, cfg.HCLOnly, cfg.Migration, run.DryRun)
-
-	if err := runPipeline(context.Background(), p, run, parsePhases(*phasesArg)); err != nil {
-		log.Error("", "%v", err)
+	if err := rootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-// runPipeline dispatches phases 1-3 to the cloud provider and 4-6 to the shared
-// (provider-agnostic) reconcile/correctness/package layer. In --dry-run it detects
-// and reports (phases 1-2 + hygiene) and writes no repo.
-func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, phases []int) error {
-	var inv *model.Inventory          // carried from Phase 2 into later phases
-	var export *provider.ExportResult // carried from Phase 3 into Phase 4
-	for _, n := range phases {
-		// Dry-run stops before any generating phase: report from the inventory only.
-		if run.DryRun && n >= 3 {
-			if inv != nil {
-				pipeline.DryReport(run, inv)
-			}
-			run.Log.Info("", "dry-run complete — detection + reports only, no repo written")
-			return nil
-		}
-		switch n {
-		case 1:
-			run.Log.Info("Preflight", "=== Phase 1 Preflight ===")
-			if _, err := p.CheckDependencies(ctx, run); err != nil {
-				run.Log.Warn("Preflight", "%v", err)
-			}
-			if _, err := p.Connect(ctx, run); err != nil {
-				run.Log.Warn("Preflight", "%v", err)
-			}
-		case 2:
-			run.Log.Info("Enumerate", "=== Phase 2 Enumerate ===")
-			got, err := p.Enumerate(ctx, run)
-			if err != nil {
-				return fmt.Errorf("phase 2 enumerate: %w", err) // fatal: never proceed on empty inventory
-			}
-			inv = got
-			if err := core.WriteJSON(run.Paths.Inventory, inv); err != nil {
-				return fmt.Errorf("write inventory: %w", err)
-			}
-			run.Log.Info("Enumerate", "inventory: %d resources -> %s", inv.Counts.Resources, run.Paths.Inventory)
-		case 3:
-			run.Log.Info("Export", "=== Phase 3 Export ===")
-			if inv == nil { // Phase 3 run alone: load the persisted inventory
-				inv = &model.Inventory{}
-				if err := core.ReadJSON(run.Paths.Inventory, inv); err != nil {
-					return fmt.Errorf("no inventory (run Phase 2 first): %w", err)
-				}
-			}
-			res, err := p.Export(ctx, run, inv)
-			if err != nil {
-				return fmt.Errorf("phase 3 export: %w", err)
-			}
-			export = res
-			for _, c := range res.Containers {
-				run.Log.Info("Export", "container %s: %d mapped, %d excluded, %d gap (mode=%s)",
-					c.Container, len(c.MappedIDs), len(c.ExcludedIDs), len(c.GapIDs), res.Mode)
-			}
-		case 4:
-			run.Log.Info("Reconcile", "=== Phase 4 Reconcile ===")
-			if inv == nil || export == nil {
-				return fmt.Errorf("phase 4 needs Phase 2+3 output in-process; run 2,3,4 together")
-			}
-			if err := pipeline.Reconcile(ctx, run, inv, export, p.Templates()); err != nil {
-				return fmt.Errorf("phase 4 reconcile: %w", err)
-			}
-		case 5:
-			run.Log.Info("Correctness", "=== Phase 5 Correctness ===")
-			if err := pipeline.Correctness(ctx, run); err != nil {
-				return fmt.Errorf("phase 5 correctness: %w", err)
-			}
-		case 6:
-			run.Log.Info("Package", "=== Phase 6 Package ===")
-			if _, err := pipeline.Package(run); err != nil {
-				return fmt.Errorf("phase 6 package: %w", err)
-			}
-		default:
-			run.Log.Warn("", "unknown phase %d, skipping", n)
-		}
+func rootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "terralift",
+		Short: "Bring existing cloud infrastructure under Terraform — brownfield to greenfield.",
+		Long: bannerText(false) + `
+TerraLift onboards live AWS, GCP, and Azure infrastructure into a plan-clean
+Terraform repo: it enumerates what's running, authors born-correct import blocks
+and HCL, reconciles it to a module layout, and verifies the round-trip.
+
+  terralift onboard --cloud gcp --scope my-project-id
+  terralift onboard --cloud aws --scope 123456789012
+  terralift clone   --cloud azure --scope <sub-id> --resource-groups rg1,rg2`,
+		// Print the error (once) but not a full usage dump on every failure; main()
+		// just sets the exit code.
+		SilenceUsage:  true,
+		SilenceErrors: false,
+		Version:       version, // enables --version
 	}
-	run.Log.Info("", "run complete")
-	return nil
+	root.SetVersionTemplate("terralift {{.Version}}\n")
+	root.AddCommand(onboardCmd(), cloneCmd(), versionCmd(), bannerCmd())
+	return root
 }
 
-func parsePhases(s string) []int {
-	var out []int
-	for _, part := range strings.Split(s, ",") {
-		if v, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
-			out = append(out, v)
-		}
+func bannerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "banner",
+		Short: "Print the TerraLift banner.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			// Colored on a terminal, plain when piped/redirected.
+			fmt.Fprint(cmd.OutOrStdout(), bannerText(isTTY(os.Stdout)))
+		},
 	}
-	sort.Ints(out)
-	return out
 }
 
-func sortedNames() []string {
-	n := provider.Names()
-	sort.Strings(n)
-	return n
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the TerraLift version.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			cmd.Printf("terralift %s\n", version)
+		},
+	}
 }
