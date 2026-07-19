@@ -5,11 +5,11 @@ TerraLift brings infrastructure you already run in the cloud under Terraform man
 It is built for brownfield environments. That means infrastructure created by hand, by ClickOps in a console, by a one-off script, or by a different tool, which now needs to live in version-controlled Terraform without a risky rebuild.
 
 ```
-                     \   |   /
-                    '  .-~-.  '
-                  ── (  ███  ) ──
-                    .  '-~-'  .
-   . ,;. ,.          /   |   \       \|/ \|/ \|/
+                      \   |   /
+                     '  .-~-.  '
+                   ── ( ███ ) ──
+                     .  '-~-'  .
+   . ,;. ,.           /   |   \          \|/ \|/ \|/
    ; .,.'; .,     ══════════════▶    \|/ \|/ \|/
    ▒▒▒▒▒▒▒▒▒▒                        ▓▓▓▓▓▓▓▓▓▓▓
    ▒▒▒▒▒▒▒▒▒▒                        ▓▓▓▓▓▓▓▓▓▓▓
