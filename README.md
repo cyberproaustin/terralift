@@ -165,4 +165,4 @@ TerraLift is built and maintained by Austin ([cyberproaustin](https://www.linked
 
 ## License
 
-A license has not been set for this repository yet. Add a `LICENSE` file before publishing or distributing binaries.
+TerraLift is released under the [MIT License](LICENSE). You are free to use, modify, and distribute it, including in commercial work, as long as the copyright notice is preserved.
