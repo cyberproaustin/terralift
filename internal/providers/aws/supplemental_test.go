@@ -59,17 +59,18 @@ func TestEnumSecurityHub(t *testing.T) {
 
 func TestEnumOrganizations(t *testing.T) {
 	mockAWS(t, map[string]string{
-		"describe-organization":  `{"Organization":{"Id":"o-abc","MasterAccountId":"123456789012"}}`,
-		"list-roots":             `{"Roots":[{"Id":"r-1"}]}`,
-		"--parent-id r-1":        `{"OrganizationalUnits":[{"Id":"ou-1","Name":"ou-one"}]}`,
-		"--parent-id ou-1":       `{"OrganizationalUnits":[]}`,
-		"SERVICE_CONTROL_POLICY": `{"Policies":[{"Id":"p-1","Name":"scp","AwsManaged":false},{"Id":"p-full","Name":"FullAWSAccess","AwsManaged":true}]}`,
-		"list-accounts":          `{"Accounts":[{"Id":"123456789012","Name":"mgmt"},{"Id":"999888777666","Name":"member"}]}`,
+		"describe-organization":   `{"Organization":{"Id":"o-abc","MasterAccountId":"123456789012"}}`,
+		"list-roots":              `{"Roots":[{"Id":"r-1"}]}`,
+		"--parent-id r-1":         `{"OrganizationalUnits":[{"Id":"ou-1","Name":"ou-one"}]}`,
+		"--parent-id ou-1":        `{"OrganizationalUnits":[]}`,
+		"SERVICE_CONTROL_POLICY":  `{"Policies":[{"Id":"p-1","Name":"scp","AwsManaged":false},{"Id":"p-full","Name":"FullAWSAccess","AwsManaged":true}]}`,
+		"list-targets-for-policy": `{"Targets":[{"TargetId":"ou-1"}]}`,
+		"list-accounts":           `{"Accounts":[{"Id":"123456789012","Name":"mgmt"},{"Id":"999888777666","Name":"member"}]}`,
 	})
 	inv := &model.Inventory{Resources: map[string]*model.Resource{}}
 	enumOrganizations(context.Background(), testRun(), inv)
 	got := tfTypesIn(inv)
-	for _, want := range []string{"aws_organizations_organization", "aws_organizations_organizational_unit", "aws_organizations_policy", "aws_organizations_account"} {
+	for _, want := range []string{"aws_organizations_organization", "aws_organizations_organizational_unit", "aws_organizations_policy", "aws_organizations_account", "aws_organizations_policy_attachment"} {
 		if !got[want] {
 			t.Errorf("missing %s; got %v", want, got)
 		}
@@ -106,19 +107,32 @@ func TestEnumIdentityStore(t *testing.T) {
 
 func TestEnrichRDSEngines(t *testing.T) {
 	mockAWS(t, map[string]string{
-		"describe-db-clusters":  `{"DBClusters":[{"DBClusterArn":"arn:aws:rds:us-east-1:123:cluster:doc","Engine":"docdb"}]}`,
-		"describe-db-instances": `{"DBInstances":[{"DBInstanceArn":"arn:aws:rds:us-east-1:123:db:doci","Engine":"docdb"}]}`,
+		"describe-db-clusters":  `{"DBClusters":[{"DBClusterArn":"arn:aws:rds:us-east-1:123:cluster:doc","Engine":"docdb"},{"DBClusterArn":"arn:aws:rds:us-east-1:123:cluster:nep","Engine":"neptune"}]}`,
+		"describe-db-instances": `{"DBInstances":[{"DBInstanceArn":"arn:aws:rds:us-east-1:123:db:doci","Engine":"docdb"},{"DBInstanceArn":"arn:aws:rds:us-east-1:123:db:nepi","Engine":"neptune"}]}`,
 	})
+	rc := func(id string) *model.Resource {
+		return &model.Resource{ID: id, NativeType: "rds:cluster", TFType: "aws_rds_cluster", Location: "us-east-1"}
+	}
+	rd := func(id string) *model.Resource {
+		return &model.Resource{ID: id, NativeType: "rds:db", TFType: "aws_db_instance", Location: "us-east-1"}
+	}
 	inv := &model.Inventory{Resources: map[string]*model.Resource{
-		"arn:aws:rds:us-east-1:123:cluster:doc": {ID: "arn:aws:rds:us-east-1:123:cluster:doc", NativeType: "rds:cluster", TFType: "aws_rds_cluster", Location: "us-east-1"},
-		"arn:aws:rds:us-east-1:123:db:doci":     {ID: "arn:aws:rds:us-east-1:123:db:doci", NativeType: "rds:db", TFType: "aws_db_instance", Location: "us-east-1"},
+		"arn:aws:rds:us-east-1:123:cluster:doc": rc("arn:aws:rds:us-east-1:123:cluster:doc"),
+		"arn:aws:rds:us-east-1:123:db:doci":     rd("arn:aws:rds:us-east-1:123:db:doci"),
+		"arn:aws:rds:us-east-1:123:cluster:nep": rc("arn:aws:rds:us-east-1:123:cluster:nep"),
+		"arn:aws:rds:us-east-1:123:db:nepi":     rd("arn:aws:rds:us-east-1:123:db:nepi"),
 	}}
 	enrichRDSEngines(context.Background(), testRun(), inv)
-	if got := inv.Resources["arn:aws:rds:us-east-1:123:cluster:doc"].TFType; got != "aws_docdb_cluster" {
-		t.Errorf("docdb cluster reclassified to %q, want aws_docdb_cluster", got)
+	want := map[string]string{
+		"arn:aws:rds:us-east-1:123:cluster:doc": "aws_docdb_cluster",
+		"arn:aws:rds:us-east-1:123:db:doci":     "aws_docdb_cluster_instance",
+		"arn:aws:rds:us-east-1:123:cluster:nep": "aws_neptune_cluster",
+		"arn:aws:rds:us-east-1:123:db:nepi":     "aws_neptune_cluster_instance",
 	}
-	if got := inv.Resources["arn:aws:rds:us-east-1:123:db:doci"].TFType; got != "aws_docdb_cluster_instance" {
-		t.Errorf("docdb instance reclassified to %q, want aws_docdb_cluster_instance", got)
+	for id, tf := range want {
+		if got := inv.Resources[id].TFType; got != tf {
+			t.Errorf("%s -> %q, want %q", id, got, tf)
+		}
 	}
 }
 

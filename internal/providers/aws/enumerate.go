@@ -160,6 +160,9 @@ func enrichRDSEngines(ctx context.Context, run *core.Run, inv *model.Inventory) 
 		case r.NativeType == "rds:db" && eng == "docdb":
 			r.TFType = "aws_docdb_cluster_instance"
 			n++
+		case r.NativeType == "rds:db" && eng == "neptune":
+			r.TFType = "aws_neptune_cluster_instance"
+			n++
 		}
 	}
 	if n > 0 {

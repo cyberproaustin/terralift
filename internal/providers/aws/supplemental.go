@@ -137,6 +137,19 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 				}
 				add(p.Id, p.Name, "aws_organizations_policy", "policy")
 				added++
+				// One aws_organizations_policy_attachment per target the policy is
+				// attached to; it imports by "target-id:policy-id".
+				var targets struct {
+					Targets []struct {
+						TargetId string `json:"TargetId"`
+					} `json:"Targets"`
+				}
+				if runAws(ctx, &targets, "organizations", "list-targets-for-policy", "--policy-id", p.Id) == nil {
+					for _, tg := range targets.Targets {
+						add(tg.TargetId+":"+p.Id, p.Name+"-"+tg.TargetId, "aws_organizations_policy_attachment", "policy-attachment")
+						added++
+					}
+				}
 			}
 		}
 	}

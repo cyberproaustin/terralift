@@ -89,6 +89,9 @@ var importIDOverride = map[string]func(r *model.Resource) string{
 	"aws_identitystore_user":             byARN,
 	"aws_identitystore_group":            byARN,
 	"aws_identitystore_group_membership": byARN,
+
+	// An org policy attachment imports by "target-id:policy-id" (stored as the id).
+	"aws_organizations_policy_attachment": byARN,
 }
 
 // cfnStackName extracts the stack NAME from a CloudFormation stack ARN
