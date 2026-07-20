@@ -15,6 +15,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
 	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
+	_ "github.com/cyberproaustin/terralift/internal/providers/github"
 )
 
 // buildVersion is stamped at release build time with
