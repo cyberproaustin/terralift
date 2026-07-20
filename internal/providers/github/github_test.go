@@ -52,6 +52,10 @@ func TestDeriveImportID(t *testing.T) {
 	if got := deriveImportID(wh); got != "my-repo/42" {
 		t.Errorf("webhook import id = %q, want my-repo/42", got)
 	}
+	bp := &model.Resource{TFType: "github_branch_protection", Properties: map[string]any{"repo": "my-repo", "pattern": "main"}}
+	if got := deriveImportID(bp); got != "my-repo:main" {
+		t.Errorf("branch protection import id = %q, want my-repo:main", got)
+	}
 }
 
 func TestAuthorWebhookURLs(t *testing.T) {

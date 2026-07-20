@@ -14,6 +14,11 @@ func deriveImportID(r *model.Resource) string {
 		repo, _ := r.Properties["repo"].(string)
 		id, _ := r.Properties["hook_id"].(string)
 		return repo + "/" + id
+	case "github_branch_protection":
+		// Imported by "repository:pattern".
+		repo, _ := r.Properties["repo"].(string)
+		pattern, _ := r.Properties["pattern"].(string)
+		return repo + ":" + pattern
 	default:
 		return r.Name
 	}

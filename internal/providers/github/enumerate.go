@@ -77,6 +77,30 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 		run.Log.Info("Enumerate", "webhooks: %d", hooks)
 	}
 
+	// Per-repo sub-resources: branch protection rules (one per protected branch).
+	protections := 0
+	for _, r := range active {
+		pbs, err := listProtectedBranches(ctx, owner, r.Name)
+		if err != nil {
+			run.Log.Verbose("Enumerate", "list protected branches for %s skipped: %v", r.FullName, err)
+			continue
+		}
+		for _, pb := range pbs {
+			add(inv, &model.Resource{
+				ID:         fmt.Sprintf("%s/protection/%s", r.FullName, pb.Name),
+				Name:       r.Name + "-protect-" + pb.Name,
+				NativeType: "github:branch_protection",
+				Container:  owner,
+				Source:     "gh-api",
+				Properties: map[string]any{"repo": r.Name, "pattern": pb.Name},
+			})
+			protections++
+		}
+	}
+	if protections > 0 {
+		run.Log.Info("Enumerate", "branch protections: %d", protections)
+	}
+
 	inv.Counts.Resources = len(inv.Resources)
 	inv.Counts.Containers = len(inv.Containers)
 	return inv, nil
@@ -95,6 +119,18 @@ type webhook struct {
 // listWebhooks returns a repository's configured webhooks.
 func listWebhooks(ctx context.Context, owner, repoName string) ([]webhook, error) {
 	return ghAPIList[webhook](ctx, fmt.Sprintf("repos/%s/%s/hooks?per_page=100", owner, repoName))
+}
+
+type protectedBranch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
+}
+
+// listProtectedBranches returns a repository's protected branches; each maps to a
+// github_branch_protection whose pattern is the branch name (exact-branch rules;
+// wildcard patterns would need the GraphQL branchProtectionRules API).
+func listProtectedBranches(ctx context.Context, owner, repoName string) ([]protectedBranch, error) {
+	return ghAPIList[protectedBranch](ctx, fmt.Sprintf("repos/%s/%s/branches?protected=true&per_page=100", owner, repoName))
 }
 
 // add records a resource, resolving its Terraform type from the native key.

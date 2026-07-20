@@ -6,6 +6,7 @@ package github
 var tfTypeMap = map[string]string{
 	"github:repository":         "github_repository",
 	"github:repository_webhook": "github_repository_webhook",
+	"github:branch_protection":  "github_branch_protection",
 }
 
 // tfType returns the Terraform type for a native key, or "" if unmapped (a gap).
