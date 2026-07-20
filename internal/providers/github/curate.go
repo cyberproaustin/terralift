@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cyberproaustin/terralift/internal/hcl"
+	"github.com/cyberproaustin/terralift/internal/util"
 )
 
 // githubPruneRules strip attributes `terraform plan -generate-config-out` over-emits
@@ -79,6 +80,48 @@ func authorRepoAttrs(path string, hasDownloads map[string]bool) int {
 		nb = append(nb, block[len(block)-1])
 		n++
 		return nb, nil
+	})
+	if n > 0 {
+		_ = os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	}
+	return n
+}
+
+var (
+	webhookHeaderRe = regexp.MustCompile(`^resource\s+"github_repository_webhook"\s+"([^"]+)"`)
+	urlAttrRe       = regexp.MustCompile(`^(\s*)url(\s*)=\s*null`)
+)
+
+// authorWebhookURLs replaces the `url = null # sensitive` line that
+// generate-config-out emits for a github_repository_webhook (it wrongly treats the
+// REQUIRED configuration.url as sensitive) with the live URL from the API, keyed by
+// the block's "github_repository_webhook.<label>" address. Returns blocks edited.
+func authorWebhookURLs(path string, urlByAddr map[string]string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	out, _ := hcl.WalkResourceBlocks(strings.Split(string(data), "\n"), func(typ string, block []string) ([]string, []hcl.Redaction) {
+		if typ != "github_repository_webhook" {
+			return block, nil
+		}
+		m := webhookHeaderRe.FindStringSubmatch(block[0])
+		if m == nil {
+			return block, nil
+		}
+		url, ok := urlByAddr["github_repository_webhook."+m[1]]
+		if !ok || url == "" {
+			return block, nil
+		}
+		for i, l := range block {
+			if sm := urlAttrRe.FindStringSubmatch(l); sm != nil {
+				block[i] = sm[1] + "url" + sm[2] + "= " + fmt.Sprintf("%q", util.EscapeHCLTemplate(url))
+				n++
+				break
+			}
+		}
+		return block, nil
 	})
 	if n > 0 {
 		_ = os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)

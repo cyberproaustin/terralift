@@ -48,6 +48,36 @@ func TestDeriveImportID(t *testing.T) {
 	if got := deriveImportID(r); got != "my-repo" {
 		t.Errorf("github_repository import id = %q, want the bare repo name", got)
 	}
+	wh := &model.Resource{TFType: "github_repository_webhook", Properties: map[string]any{"repo": "my-repo", "hook_id": "42"}}
+	if got := deriveImportID(wh); got != "my-repo/42" {
+		t.Errorf("webhook import id = %q, want my-repo/42", got)
+	}
+}
+
+func TestAuthorWebhookURLs(t *testing.T) {
+	dir := t.TempDir()
+	p := dir + "/generated.tf"
+	// generate-config-out nulls the REQUIRED configuration.url (marks it sensitive).
+	src := `resource "github_repository_webhook" "r_hook_1" {
+  active     = false
+  repository = "r"
+  configuration {
+    content_type = "json"
+    url          = null # sensitive
+  }
+}`
+	writeFile(t, p, src)
+	n := authorWebhookURLs(p, map[string]string{"github_repository_webhook.r_hook_1": "https://example.com/h"})
+	if n != 1 {
+		t.Fatalf("authored %d webhook urls, want 1", n)
+	}
+	out := readFile(t, p)
+	if !strings.Contains(out, `= "https://example.com/h"`) {
+		t.Errorf("webhook url not authored from live value:\n%s", out)
+	}
+	if strings.Contains(out, "null") {
+		t.Errorf("null url not replaced:\n%s", out)
+	}
 }
 
 func TestPruneGeneratedHCL(t *testing.T) {
