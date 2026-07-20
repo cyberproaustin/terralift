@@ -145,6 +145,21 @@ func caiToResource(r caiResource) *model.Resource {
 		if isRegionLocation(r.Location) { // a regional PD (the type map defaults to the zonal disk)
 			tf = "google_compute_region_disk"
 		}
+	case "compute.googleapis.com/Autoscaler":
+		// Not in the base type map; resolve zonal vs regional from the location.
+		tf = "google_compute_autoscaler"
+		if isRegionLocation(r.Location) {
+			tf = "google_compute_region_autoscaler"
+		}
+	case "compute.googleapis.com/NetworkEndpointGroup":
+		// The type map defaults to the zonal NEG; a regional (e.g. serverless) or
+		// global NEG shares the CAI asset type and is resolved by location.
+		switch {
+		case strings.EqualFold(r.Location, "global"):
+			tf = "google_compute_global_network_endpoint_group"
+		case isRegionLocation(r.Location):
+			tf = "google_compute_region_network_endpoint_group"
+		}
 	case "logging.googleapis.com/LogSink":
 		tf = logSinkType(r.Name)
 	case "cloudfunctions.googleapis.com/Function":

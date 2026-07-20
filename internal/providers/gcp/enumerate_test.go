@@ -38,6 +38,11 @@ func TestCAIRegionalClassification(t *testing.T) {
 		{"compute.googleapis.com/Disk", "us-central1-a", "google_compute_disk"},
 		{"compute.googleapis.com/Address", "us-central1", "google_compute_address"},
 		{"compute.googleapis.com/Address", "global", "google_compute_global_address"},
+		{"compute.googleapis.com/Autoscaler", "us-central1-a", "google_compute_autoscaler"},
+		{"compute.googleapis.com/Autoscaler", "us-central1", "google_compute_region_autoscaler"},
+		{"compute.googleapis.com/NetworkEndpointGroup", "us-central1-a", "google_compute_network_endpoint_group"},
+		{"compute.googleapis.com/NetworkEndpointGroup", "us-central1", "google_compute_region_network_endpoint_group"},
+		{"compute.googleapis.com/NetworkEndpointGroup", "global", "google_compute_global_network_endpoint_group"},
 	}
 	for _, c := range cases {
 		r := caiResource{
