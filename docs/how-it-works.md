@@ -20,6 +20,10 @@ Builds a cloud-neutral inventory of what is running. Each cloud has a different 
 
 Enumeration also collects IAM bindings and public-exposure signals, such as a firewall open to the internet or an object made public. The result is written to `inventory.json`, so later phases can reload it.
 
+Each enumerated resource is classified into a Terraform type. Most map one to one, but a cloud's inventory sometimes reports several distinct resources under a single type. TerraLift disambiguates these from the resource's own attributes: a GCP load-balancer component is resolved to its regional or global Terraform type by location, and an AWS `rds:cluster` is resolved to Aurora, DocumentDB, or Neptune by its engine.
+
+Some services are not indexed by the cloud's inventory at all. AWS Resource Explorer, for example, does not list SecurityHub, Organizations, or Identity Center resources. For those, a supplemental enumeration step queries the service's own APIs directly and injects the results into the inventory, so they are onboarded alongside everything else.
+
 ### Phase 3: Export
 
 Turns the inventory into born-correct Terraform. Two things happen here.

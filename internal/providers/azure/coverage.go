@@ -6,6 +6,8 @@ package azure
 // Microsoft.Web/sites; this map is for coverage CLASSIFICATION only — the actual
 // export type mapping is done authoritatively by aztfexport). Inert if stale.
 var azureTypeToTFExtra = map[string]string{
+	"microsoft.analysisservices/servers":                                                                  "azurerm_analysis_services_server",
+	"microsoft.compute/sshpublickeys":                                                                     "azurerm_ssh_public_key",
 	"microsoft.advisor/recommendations/suppressions":                                                      "azurerm_advisor_suppression",
 	"microsoft.alertsmanagement/actionrules":                                                              "azurerm_monitor_alert_processing_rule_action_group",
 	"microsoft.apimanagement/service":                                                                     "azurerm_api_management",

@@ -149,6 +149,8 @@ Clone mode is useful for disaster-recovery templates, spinning up a matching sta
 | GCP | Cloud Asset Inventory | `terraform plan -generate-config-out` |
 | Azure | Resource Graph | aztfexport |
 
+Coverage spans the common control-plane resource types across each cloud (networking, compute, storage, databases, IAM, load balancing, serverless, containers, CI/CD), and extends to services the cloud inventory does not index, such as AWS SecurityHub, Organizations, and Identity Center, through direct API enumeration.
+
 ## Documentation
 
 - [Getting Started](docs/getting-started.md): prerequisites, authentication for each cloud, your first run, and how to apply the output.
