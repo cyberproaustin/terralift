@@ -60,6 +60,18 @@ func TestDeriveImportID(t *testing.T) {
 	if got := deriveImportID(mem); got != "my-org:alice" {
 		t.Errorf("membership import id = %q, want my-org:alice", got)
 	}
+	tm := &model.Resource{TFType: "github_team", Properties: map[string]any{"team_id": "42"}}
+	if got := deriveImportID(tm); got != "42" {
+		t.Errorf("team import id = %q, want 42", got)
+	}
+	tmem := &model.Resource{TFType: "github_team_membership", Properties: map[string]any{"team_id": "42", "username": "alice"}}
+	if got := deriveImportID(tmem); got != "42:alice" {
+		t.Errorf("team membership import id = %q, want 42:alice", got)
+	}
+	oh := &model.Resource{TFType: "github_organization_webhook", Properties: map[string]any{"hook_id": "99"}}
+	if got := deriveImportID(oh); got != "99" {
+		t.Errorf("org webhook import id = %q, want 99", got)
+	}
 }
 
 func TestAuthorWebhookURLs(t *testing.T) {

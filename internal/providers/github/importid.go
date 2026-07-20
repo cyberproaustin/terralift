@@ -24,6 +24,19 @@ func deriveImportID(r *model.Resource) string {
 		org, _ := r.Properties["org"].(string)
 		user, _ := r.Properties["username"].(string)
 		return org + ":" + user
+	case "github_team":
+		// Imported by the numeric team id.
+		id, _ := r.Properties["team_id"].(string)
+		return id
+	case "github_team_membership":
+		// Imported by "team_id:username".
+		id, _ := r.Properties["team_id"].(string)
+		user, _ := r.Properties["username"].(string)
+		return id + ":" + user
+	case "github_organization_webhook":
+		// Imported by the numeric hook id.
+		id, _ := r.Properties["hook_id"].(string)
+		return id
 	default:
 		return r.Name
 	}

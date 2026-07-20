@@ -59,7 +59,7 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	for i, it := range items {
 		itemAddr[i] = it.res.TFType + "." + names[i]
 		b.WriteString(hcl.ImportBlock(itemAddr[i], it.importID))
-		if it.res.TFType == "github_repository_webhook" {
+		if it.res.TFType == "github_repository_webhook" || it.res.TFType == "github_organization_webhook" {
 			if u, _ := it.res.Properties["url"].(string); u != "" {
 				webhookURLByAddr[itemAddr[i]] = u
 			}

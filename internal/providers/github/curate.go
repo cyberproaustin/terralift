@@ -88,14 +88,14 @@ func authorRepoAttrs(path string, hasDownloads map[string]bool) int {
 }
 
 var (
-	webhookHeaderRe = regexp.MustCompile(`^resource\s+"github_repository_webhook"\s+"([^"]+)"`)
-	urlAttrRe       = regexp.MustCompile(`^(\s*)url(\s*)=\s*null`)
+	webhookLabelRe = regexp.MustCompile(`^resource\s+"(?:github_repository_webhook|github_organization_webhook)"\s+"([^"]+)"`)
+	urlAttrRe      = regexp.MustCompile(`^(\s*)url(\s*)=\s*null`)
 )
 
 // authorWebhookURLs replaces the `url = null # sensitive` line that
-// generate-config-out emits for a github_repository_webhook (it wrongly treats the
-// REQUIRED configuration.url as sensitive) with the live URL from the API, keyed by
-// the block's "github_repository_webhook.<label>" address. Returns blocks edited.
+// generate-config-out emits for a repository/organization webhook (it wrongly
+// treats the REQUIRED configuration.url as sensitive) with the live URL from the
+// API, keyed by the block's "<type>.<label>" address. Returns blocks edited.
 func authorWebhookURLs(path string, urlByAddr map[string]string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -103,14 +103,14 @@ func authorWebhookURLs(path string, urlByAddr map[string]string) int {
 	}
 	n := 0
 	out, _ := hcl.WalkResourceBlocks(strings.Split(string(data), "\n"), func(typ string, block []string) ([]string, []hcl.Redaction) {
-		if typ != "github_repository_webhook" {
+		if typ != "github_repository_webhook" && typ != "github_organization_webhook" {
 			return block, nil
 		}
-		m := webhookHeaderRe.FindStringSubmatch(block[0])
+		m := webhookLabelRe.FindStringSubmatch(block[0])
 		if m == nil {
 			return block, nil
 		}
-		url, ok := urlByAddr["github_repository_webhook."+m[1]]
+		url, ok := urlByAddr[typ+"."+m[1]]
 		if !ok || url == "" {
 			return block, nil
 		}

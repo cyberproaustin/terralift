@@ -126,32 +126,94 @@ func listWebhooks(ctx context.Context, owner, repoName string) ([]webhook, error
 	return ghAPIList[webhook](ctx, fmt.Sprintf("repos/%s/%s/hooks?per_page=100", owner, repoName))
 }
 
-// enumOrg injects organization-level resources (members; teams and org webhooks
-// are added as their scopes become available). owner is the org login.
+// enumOrg injects organization-level resources: members, teams (+ their
+// memberships), and org webhooks. owner is the org login. Each list call is
+// best-effort — a missing scope leaves a Verbose trace rather than aborting.
 func enumOrg(ctx context.Context, run *core.Run, inv *model.Inventory, owner string) {
-	members, err := ghAPIList[orgMember](ctx, fmt.Sprintf("orgs/%s/members?per_page=100", owner))
-	if err != nil {
+	if members, err := ghAPIList[orgMember](ctx, fmt.Sprintf("orgs/%s/members?per_page=100", owner)); err != nil {
 		run.Log.Verbose("Enumerate", "list org members skipped: %v", err)
-		return
+	} else {
+		for _, m := range members {
+			add(inv, &model.Resource{
+				ID:         fmt.Sprintf("%s/members/%s", owner, m.Login),
+				Name:       "member-" + m.Login,
+				NativeType: "github:membership",
+				Container:  owner,
+				Source:     "gh-api",
+				Properties: map[string]any{"org": owner, "username": m.Login},
+			})
+		}
+		if len(members) > 0 {
+			run.Log.Info("Enumerate", "org members: %d", len(members))
+		}
 	}
-	for _, m := range members {
-		add(inv, &model.Resource{
-			ID:         fmt.Sprintf("%s/members/%s", owner, m.Login),
-			Name:       "member-" + m.Login,
-			NativeType: "github:membership",
-			Container:  owner,
-			Source:     "gh-api",
-			Properties: map[string]any{"org": owner, "username": m.Login},
-		})
+
+	teams, err := ghAPIList[team](ctx, fmt.Sprintf("orgs/%s/teams?per_page=100", owner))
+	if err != nil {
+		run.Log.Verbose("Enumerate", "list teams skipped: %v", err)
+	} else {
+		tms := 0
+		for _, tm := range teams {
+			teamID := strconv.FormatInt(tm.ID, 10)
+			add(inv, &model.Resource{
+				ID:         fmt.Sprintf("%s/teams/%s", owner, tm.Slug),
+				Name:       "team-" + tm.Slug,
+				NativeType: "github:team",
+				Container:  owner,
+				Source:     "gh-api",
+				Properties: map[string]any{"team_id": teamID},
+			})
+			mems, merr := ghAPIList[orgMember](ctx, fmt.Sprintf("orgs/%s/teams/%s/members?per_page=100", owner, tm.Slug))
+			if merr != nil {
+				run.Log.Verbose("Enumerate", "list members of team %s skipped: %v", tm.Slug, merr)
+				continue
+			}
+			for _, mm := range mems {
+				add(inv, &model.Resource{
+					ID:         fmt.Sprintf("%s/teams/%s/members/%s", owner, tm.Slug, mm.Login),
+					Name:       "teammember-" + tm.Slug + "-" + mm.Login,
+					NativeType: "github:team_membership",
+					Container:  owner,
+					Source:     "gh-api",
+					Properties: map[string]any{"team_id": teamID, "username": mm.Login},
+				})
+				tms++
+			}
+		}
+		if len(teams) > 0 {
+			run.Log.Info("Enumerate", "teams: %d (%d membership(s))", len(teams), tms)
+		}
 	}
-	if len(members) > 0 {
-		run.Log.Info("Enumerate", "org members: %d", len(members))
+
+	if hooks, err := ghAPIList[webhook](ctx, fmt.Sprintf("orgs/%s/hooks?per_page=100", owner)); err != nil {
+		run.Log.Verbose("Enumerate", "list org webhooks skipped: %v", err)
+	} else {
+		for _, h := range hooks {
+			hookID := strconv.FormatInt(h.ID, 10)
+			add(inv, &model.Resource{
+				ID:         fmt.Sprintf("%s/hooks/%s", owner, hookID),
+				Name:       "orghook-" + hookID,
+				NativeType: "github:organization_webhook",
+				Container:  owner,
+				Source:     "gh-api",
+				Properties: map[string]any{"hook_id": hookID, "url": h.Config.URL},
+			})
+		}
+		if len(hooks) > 0 {
+			run.Log.Info("Enumerate", "org webhooks: %d", len(hooks))
+		}
 	}
 }
 
 type orgMember struct {
 	Login string `json:"login"`
 	ID    int64  `json:"id"`
+}
+
+type team struct {
+	ID   int64  `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
 }
 
 type protectedBranch struct {
