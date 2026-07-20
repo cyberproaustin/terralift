@@ -74,6 +74,15 @@ var importIDOverride = map[string]func(r *model.Resource) string{
 	// A CloudFormation stack imports by its NAME; the ARN's last segment is the
 	// stack UUID, so extract the name from the ARN path.
 	"aws_cloudformation_stack": func(r *model.Resource) string { return cfnStackName(r.ID) },
+
+	// SecurityHub is enabled per account+region; aws_securityhub_account imports by
+	// the ACCOUNT ID, not the hub ARN (whose last segment is "default").
+	"aws_securityhub_account": func(r *model.Resource) string {
+		if p := arnParts(r.ID); len(p) >= 5 {
+			return p[4] // account id
+		}
+		return arnName(r.ID)
+	},
 }
 
 // cfnStackName extracts the stack NAME from a CloudFormation stack ARN

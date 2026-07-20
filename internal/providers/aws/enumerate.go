@@ -48,6 +48,10 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 		}
 		inv.Resources[strings.ToLower(res.ID)] = res
 	}
+	// Supplemental enumeration: some services are NOT indexed by Resource Explorer
+	// (e.g. SecurityHub, Access Analyzer), so they never appear in the floor above.
+	// These enumerators inject such resources via direct describe/list calls.
+	enumSupplemental(ctx, run, inv)
 	if want := containerSet(run.Config.Containers); want != nil {
 		dropped := 0
 		for id, res := range inv.Resources {
