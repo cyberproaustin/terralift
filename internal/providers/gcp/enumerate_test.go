@@ -6,6 +6,51 @@ import (
 	"github.com/cyberproaustin/terralift/internal/model"
 )
 
+func TestIsRegionLocation(t *testing.T) {
+	cases := map[string]bool{
+		"us-central1":   true,
+		"europe-west1":  true,
+		"global":        false,
+		"GLOBAL":        false,
+		"us-central1-a": false, // zone
+		"":              false,
+	}
+	for loc, want := range cases {
+		if got := isRegionLocation(loc); got != want {
+			t.Errorf("isRegionLocation(%q) = %v, want %v", loc, got, want)
+		}
+	}
+}
+
+func TestCAIRegionalClassification(t *testing.T) {
+	// CAI reports one asset type for global/regional/zonal variants; caiToResource
+	// must resolve the concrete Terraform type from the location.
+	cases := []struct {
+		assetType, location, want string
+	}{
+		{"compute.googleapis.com/BackendService", "us-central1", "google_compute_region_backend_service"},
+		{"compute.googleapis.com/BackendService", "global", "google_compute_backend_service"},
+		{"compute.googleapis.com/HealthCheck", "us-central1", "google_compute_region_health_check"},
+		{"compute.googleapis.com/HealthCheck", "global", "google_compute_health_check"},
+		{"compute.googleapis.com/UrlMap", "us-central1", "google_compute_region_url_map"},
+		{"compute.googleapis.com/TargetHttpProxy", "us-central1", "google_compute_region_target_http_proxy"},
+		{"compute.googleapis.com/Disk", "us-central1", "google_compute_region_disk"},
+		{"compute.googleapis.com/Disk", "us-central1-a", "google_compute_disk"},
+		{"compute.googleapis.com/Address", "us-central1", "google_compute_address"},
+		{"compute.googleapis.com/Address", "global", "google_compute_global_address"},
+	}
+	for _, c := range cases {
+		r := caiResource{
+			AssetType: c.assetType,
+			Location:  c.location,
+			Name:      "//compute.googleapis.com/projects/p/regions/us-central1/x/n",
+		}
+		if got := caiToResource(r).TFType; got != c.want {
+			t.Errorf("%s @ %s -> %q, want %q", c.assetType, c.location, got, c.want)
+		}
+	}
+}
+
 func TestPrincipalType(t *testing.T) {
 	cases := map[string]string{
 		"allUsers":              "Public",

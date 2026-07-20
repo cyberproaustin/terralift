@@ -122,6 +122,29 @@ func caiToResource(r caiResource) *model.Resource {
 		if gcpZoneRe.MatchString(r.Location) { // zonal MIG (the type map defaults to the region variant)
 			tf = "google_compute_instance_group_manager"
 		}
+	// Internal/regional load-balancer components: CAI reports one asset type for the
+	// global and regional variants, so a region location selects the region_* resource
+	// (the type map defaults to the global variant).
+	case "compute.googleapis.com/BackendService":
+		if isRegionLocation(r.Location) {
+			tf = "google_compute_region_backend_service"
+		}
+	case "compute.googleapis.com/HealthCheck":
+		if isRegionLocation(r.Location) {
+			tf = "google_compute_region_health_check"
+		}
+	case "compute.googleapis.com/UrlMap":
+		if isRegionLocation(r.Location) {
+			tf = "google_compute_region_url_map"
+		}
+	case "compute.googleapis.com/TargetHttpProxy":
+		if isRegionLocation(r.Location) {
+			tf = "google_compute_region_target_http_proxy"
+		}
+	case "compute.googleapis.com/Disk":
+		if isRegionLocation(r.Location) { // a regional PD (the type map defaults to the zonal disk)
+			tf = "google_compute_region_disk"
+		}
 	case "logging.googleapis.com/LogSink":
 		tf = logSinkType(r.Name)
 	case "cloudfunctions.googleapis.com/Function":
@@ -159,6 +182,13 @@ func customRoleType(caiName string) string {
 // gcpZoneRe matches a zone (region + "-" + a single letter, e.g. us-central1-a),
 // distinguishing zonal resources from regional ones (us-central1) by location.
 var gcpZoneRe = regexp.MustCompile(`-[a-z]$`)
+
+// isRegionLocation reports whether a CAI location is a REGION (e.g. us-central1),
+// as opposed to "global" or a zone (us-central1-a). Used to pick the region_*
+// Terraform resource for compute asset types CAI reports without that distinction.
+func isRegionLocation(loc string) bool {
+	return loc != "" && !strings.EqualFold(loc, "global") && !gcpZoneRe.MatchString(loc)
+}
 
 // logSinkType resolves a logging sink's Terraform resource from the scope encoded
 // in its CAI resource name. A project sink miswired to google_logging_billing_
