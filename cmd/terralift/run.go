@@ -128,6 +128,8 @@ func defaultScopeType(cloud string) string {
 		return "account"
 	case "azure":
 		return "subscription"
+	case "github":
+		return "tenant" // a user account; connect() upgrades to "organization" if the login is an org
 	default: // gcp
 		return "project"
 	}

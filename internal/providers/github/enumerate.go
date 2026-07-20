@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -291,21 +293,36 @@ type secretName struct {
 
 // listSecrets returns a repository's Actions secret NAMES (values are never
 // returned by the API — they are write-only). The endpoint nests the array under
-// `.secrets`, so this decodes the object rather than paging a bare array.
+// `.secrets`, and --paginate emits one such object per page, so decode successive
+// objects and flatten their `.secrets`.
 func listSecrets(ctx context.Context, owner, repoName string) ([]secretName, error) {
-	var resp struct {
-		Secrets []secretName `json:"secrets"`
-	}
-	if err := ghAPI(ctx, &resp, fmt.Sprintf("repos/%s/%s/actions/secrets?per_page=100", owner, repoName)); err != nil {
+	out, err := ghExec(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/%s/actions/secrets?per_page=100", owner, repoName))
+	if err != nil {
 		return nil, err
 	}
-	return resp.Secrets, nil
+	dec := json.NewDecoder(strings.NewReader(string(out)))
+	var all []secretName
+	for {
+		var page struct {
+			Secrets []secretName `json:"secrets"`
+		}
+		if derr := dec.Decode(&page); derr == io.EOF {
+			break
+		} else if derr != nil {
+			return nil, fmt.Errorf("decode actions secrets page: %w", derr)
+		}
+		all = append(all, page.Secrets...)
+	}
+	return all, nil
 }
 
-// add records a resource, resolving its Terraform type from the native key.
+// add records a resource, resolving its Terraform type from the native key. The map
+// is keyed by the RAW id: GitHub branch and label names are case-sensitive, so
+// lower-casing the key would collapse case-distinct resources (e.g. branches Main
+// and main) into one and drop the other.
 func add(inv *model.Inventory, r *model.Resource) {
 	r.TFType = tfType(r.NativeType)
-	inv.Resources[strings.ToLower(r.ID)] = r
+	inv.Resources[r.ID] = r
 }
 
 type repo struct {

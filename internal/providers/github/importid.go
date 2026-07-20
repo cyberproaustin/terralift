@@ -1,11 +1,23 @@
 package github
 
-import "github.com/cyberproaustin/terralift/internal/model"
+import (
+	"github.com/cyberproaustin/terralift/internal/model"
+	"github.com/cyberproaustin/terralift/internal/util"
+)
 
-// deriveImportID returns the Terraform import ID for a GitHub resource. Formats are
-// per the integrations/github provider's per-resource "Import" docs; the owner is
-// taken from the provider config, so most ids are the bare resource name.
+// deriveImportID returns the HCL-template-escaped Terraform import ID for a GitHub
+// resource. Escaping is essential: import IDs embed free text (label names, branch
+// patterns) that may contain ${ } / %{ }, and hcl.ImportBlock renders the id with
+// %q, which does NOT neutralize template sequences — an unescaped `${file(...)}` in
+// a label would be evaluated by `terraform plan -generate-config-out`.
 func deriveImportID(r *model.Resource) string {
+	return util.EscapeHCLTemplate(rawImportID(r))
+}
+
+// rawImportID derives the un-escaped import ID per the integrations/github
+// provider's per-resource "Import" docs; the owner is taken from the provider
+// config, so most ids are the bare resource name.
+func rawImportID(r *model.Resource) string {
 	switch r.TFType {
 	case "github_repository":
 		return r.Name // imported by the repo name alone

@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -57,11 +58,20 @@ func connect(ctx context.Context, run *core.Run) (*provider.AuthContext, error) 
 		scope.ID = login
 	}
 	// An org and a user login share the same namespace; the enumeration endpoints
-	// differ, so resolve which one this is.
-	if isOrg(ctx, scope.ID) {
+	// differ, so resolve which one this is. Critically, a USER scope is enumerated
+	// via `user/repos` — the AUTHENTICATED user's repos — which ignores scope.ID, so
+	// a typo or another user's login would silently enumerate THIS account's repos
+	// under the wrong owner. Guard against that.
+	requestedOrg := scope.Type == model.ScopeOrganization // explicit --scope-type organization
+	switch {
+	case isOrg(ctx, scope.ID):
 		scope.Type = model.ScopeOrganization
-	} else {
-		scope.Type = model.ScopeTenant // a user account: the whole account is the scope
+	case requestedOrg:
+		return nil, fmt.Errorf("--scope-type organization was set, but %q is not an organization visible to this token (check the login, read:org scope, and any SSO authorization)", scope.ID)
+	case strings.EqualFold(scope.ID, login):
+		scope.Type = model.ScopeTenant // the authenticated user's own account
+	default:
+		return nil, fmt.Errorf("scope %q is neither an organization visible to this token nor the authenticated user %q; a user scope can only enumerate the authenticated account", scope.ID, login)
 	}
 	run.Scope = scope
 

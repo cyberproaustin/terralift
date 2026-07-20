@@ -2,10 +2,12 @@ package github
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/cyberproaustin/terralift/internal/core"
 	"github.com/cyberproaustin/terralift/internal/model"
 )
 
@@ -79,6 +81,49 @@ func TestDeriveImportID(t *testing.T) {
 	sec := &model.Resource{TFType: "github_actions_secret", Properties: map[string]any{"repo": "r", "secret_name": "TOKEN"}}
 	if got := deriveImportID(sec); got != "r/TOKEN" {
 		t.Errorf("secret import id = %q, want r/TOKEN", got)
+	}
+}
+
+func TestDeriveImportIDEscapesTemplates(t *testing.T) {
+	// A label name containing a Terraform template sequence must be neutralized so
+	// generate-config-out does not evaluate it (e.g. ${file("/etc/passwd")}).
+	evil := &model.Resource{TFType: "github_issue_label", Properties: map[string]any{"repo": "r", "label": `${file("/etc/passwd")}`}}
+	got := deriveImportID(evil)
+	// EscapeHCLTemplate turns ${ into the escaped $${ (which Terraform reads back as
+	// a literal ${), so the sequence is no longer evaluated at plan time.
+	if !strings.Contains(got, `$${file`) {
+		t.Errorf("template sequence not escaped (want $${): %q", got)
+	}
+}
+
+func TestConnectScopeGuard(t *testing.T) {
+	orig := ghExec
+	t.Cleanup(func() { ghExec = orig })
+	// gh api user -> {login: alice}; gh api orgs/<x> -> 404 (not an org).
+	ghExec = func(_ context.Context, args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "api user"):
+			return []byte(`{"login":"alice"}`), nil
+		case strings.Contains(joined, "auth token"):
+			return []byte("gho_x"), nil
+		default: // orgs/<x> and anything else: not found
+			return nil, errors.New("gh: Not Found (HTTP 404)")
+		}
+	}
+	// A non-org scope that is NOT the authed user must be rejected, not silently
+	// enumerate alice's own repos.
+	run := &core.Run{Scope: model.Scope{ID: "someone-else"}, Log: core.NewLogger(core.ParseLevel("error"))}
+	if _, err := connect(context.Background(), run); err == nil {
+		t.Fatal("expected an error for a user scope that is not the authenticated user")
+	}
+	// The authed user's own account resolves to a tenant scope.
+	run2 := &core.Run{Scope: model.Scope{ID: "alice"}, Log: core.NewLogger(core.ParseLevel("error"))}
+	if _, err := connect(context.Background(), run2); err != nil {
+		t.Fatalf("authed-user scope should resolve, got %v", err)
+	}
+	if run2.Scope.Type != model.ScopeTenant {
+		t.Errorf("scope type = %q, want tenant", run2.Scope.Type)
 	}
 }
 

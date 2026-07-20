@@ -89,7 +89,9 @@ provider "github" {
   # Auth via the GITHUB_TOKEN environment variable (never inline a token in config).
 }
 `, owner)
-	_ = os.WriteFile(filepath.Join(dir, "providers.tf"), []byte(prov), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "providers.tf"), []byte(prov), 0o644); err != nil {
+		return nil, err
+	}
 
 	run.Log.Info("Export", "%d resource import blocks (%d excluded, %d gap) -> %s", len(items), len(excluded), len(gap), dir)
 
