@@ -101,6 +101,11 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 		run.Log.Info("Enumerate", "branch protections: %d", protections)
 	}
 
+	// Org-level resources (only when the scope is an organization).
+	if scope.Type == model.ScopeOrganization {
+		enumOrg(ctx, run, inv, owner)
+	}
+
 	inv.Counts.Resources = len(inv.Resources)
 	inv.Counts.Containers = len(inv.Containers)
 	return inv, nil
@@ -119,6 +124,34 @@ type webhook struct {
 // listWebhooks returns a repository's configured webhooks.
 func listWebhooks(ctx context.Context, owner, repoName string) ([]webhook, error) {
 	return ghAPIList[webhook](ctx, fmt.Sprintf("repos/%s/%s/hooks?per_page=100", owner, repoName))
+}
+
+// enumOrg injects organization-level resources (members; teams and org webhooks
+// are added as their scopes become available). owner is the org login.
+func enumOrg(ctx context.Context, run *core.Run, inv *model.Inventory, owner string) {
+	members, err := ghAPIList[orgMember](ctx, fmt.Sprintf("orgs/%s/members?per_page=100", owner))
+	if err != nil {
+		run.Log.Verbose("Enumerate", "list org members skipped: %v", err)
+		return
+	}
+	for _, m := range members {
+		add(inv, &model.Resource{
+			ID:         fmt.Sprintf("%s/members/%s", owner, m.Login),
+			Name:       "member-" + m.Login,
+			NativeType: "github:membership",
+			Container:  owner,
+			Source:     "gh-api",
+			Properties: map[string]any{"org": owner, "username": m.Login},
+		})
+	}
+	if len(members) > 0 {
+		run.Log.Info("Enumerate", "org members: %d", len(members))
+	}
+}
+
+type orgMember struct {
+	Login string `json:"login"`
+	ID    int64  `json:"id"`
 }
 
 type protectedBranch struct {

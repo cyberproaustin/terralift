@@ -19,6 +19,11 @@ func deriveImportID(r *model.Resource) string {
 		repo, _ := r.Properties["repo"].(string)
 		pattern, _ := r.Properties["pattern"].(string)
 		return repo + ":" + pattern
+	case "github_membership":
+		// Imported by "org:username".
+		org, _ := r.Properties["org"].(string)
+		user, _ := r.Properties["username"].(string)
+		return org + ":" + user
 	default:
 		return r.Name
 	}

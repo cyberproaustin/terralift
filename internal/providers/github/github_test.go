@@ -56,6 +56,10 @@ func TestDeriveImportID(t *testing.T) {
 	if got := deriveImportID(bp); got != "my-repo:main" {
 		t.Errorf("branch protection import id = %q, want my-repo:main", got)
 	}
+	mem := &model.Resource{TFType: "github_membership", Properties: map[string]any{"org": "my-org", "username": "alice"}}
+	if got := deriveImportID(mem); got != "my-org:alice" {
+		t.Errorf("membership import id = %q, want my-org:alice", got)
+	}
 }
 
 func TestAuthorWebhookURLs(t *testing.T) {
