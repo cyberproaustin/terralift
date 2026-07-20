@@ -41,9 +41,14 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 		mode = "hcl-only"
 	}
 
+	// Roles onboarded in ANY stack, keyed by ARN. IAM roles live in the global
+	// stack, so a regional stack that references one (a role_arn) resolves it via a
+	// data source rather than leaving a dangling literal ARN that a rebuild can't wire.
+	roles := crossStackRoles(inv)
+
 	var results []provider.ContainerExport
 	for _, c := range containers {
-		ce, err := exportContainer(ctx, run, c, byContainer[c])
+		ce, err := exportContainer(ctx, run, c, byContainer[c], roles)
 		if err != nil {
 			run.Log.Warn("Export", "container %q: %v (skipping)", c, err)
 			continue
@@ -56,7 +61,7 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	return &provider.ExportResult{Mode: mode, Containers: results}, nil
 }
 
-func exportContainer(ctx context.Context, run *core.Run, container string, resources []*model.Resource) (*provider.ContainerExport, error) {
+func exportContainer(ctx context.Context, run *core.Run, container string, resources []*model.Resource, crossStackRoleMap map[string]string) (*provider.ContainerExport, error) {
 	dir := filepath.Join(run.Paths.Export, naming.Sanitize(container))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -145,6 +150,7 @@ func exportContainer(ctx context.Context, run *core.Run, container string, resou
 			addEcsListenerDeps(gen, allListenerAddrs(gen)) // ALL listeners (authored + generate-config-out)
 			authored += len(listeners)
 			xref := rewireCrossRefs(gen, crossRef)
+			xref += rewireCrossStackRoleRefs(gen, crossStackRoleMap)
 			run.Log.Info("Export", "%s: generated draft HCL (%d pruned, %d rule-blocks, %d cross-refs, %d authored, %d scrubbed/placeholder)", container, pruned, blockified, xref, authored, len(redactions))
 		} else {
 			run.Log.Warn("Export", "%s: generate-config-out produced no HCL: %v", container, genErr)
@@ -989,6 +995,76 @@ func rewireCrossRefs(path string, byType map[string][]refTarget) int {
 	if n > 0 {
 		_ = os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 	}
+	return n
+}
+
+// crossStackRoles maps each onboarded IAM role's ARN (lower-cased) to its role
+// name. IAM roles land in the global stack, so a regional stack that references a
+// role by ARN uses this to emit a `data "aws_iam_role"` source and rewire the
+// reference (see rewireCrossStackRoleRefs). Excluded roles (service-linked,
+// AWS-managed) are left out, so a reference to one stays a literal ARN.
+func crossStackRoles(inv *model.Inventory) map[string]string {
+	out := map[string]string{}
+	for _, r := range inv.Resources {
+		if r.TFType == "aws_iam_role" && excludedReason(r) == "" {
+			out[strings.ToLower(r.ID)] = arnName(r.ID)
+		}
+	}
+	return out
+}
+
+// crossStackRoleAttrRe matches an IAM-role ARN reference (role_arn and the
+// ECS/CodeBuild variants) assigned a literal ARN.
+var crossStackRoleAttrRe = regexp.MustCompile(`^(\s*)(role_arn|execution_role_arn|task_role_arn|service_role)(\s*=\s*)"([^"]+)"\s*(#.*)?$`)
+
+// rewireCrossStackRoleRefs rewrites a literal IAM-role ARN that references a role
+// onboarded in ANOTHER stack (roles live in the global stack) into a
+// `data.aws_iam_role.<x>.arn` reference, and appends the matching, deduplicated
+// `data "aws_iam_role"` blocks. A role that is a resource in THIS stack, or not
+// onboarded at all, is left literal. This is what the per-container reference
+// rewiring cannot do, since the target resource lives in a different stack.
+func rewireCrossStackRoleRefs(path string, roles map[string]string) int {
+	if len(roles) == 0 {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	declared := hcl.ScanAddrs(string(data)) // roles declared as resources in THIS stack
+	lines := strings.Split(string(data), "\n")
+	dataBlocks := map[string]string{} // data label -> role name
+	n := 0
+	for i, l := range lines {
+		m := crossStackRoleAttrRe.FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		name, ok := roles[strings.ToLower(m[4])]
+		if !ok {
+			continue // not an onboarded role — leave the literal ARN
+		}
+		label := naming.Sanitize(name)
+		if declared["aws_iam_role."+label] {
+			continue // the role is a resource in this stack; a data source would duplicate it
+		}
+		lines[i] = m[1] + m[2] + m[3] + "data.aws_iam_role." + label + ".arn"
+		dataBlocks[label] = name
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	labels := make([]string, 0, len(dataBlocks))
+	for lbl := range dataBlocks {
+		labels = append(labels, lbl)
+	}
+	sort.Strings(labels)
+	var b strings.Builder
+	for _, lbl := range labels {
+		fmt.Fprintf(&b, "\ndata \"aws_iam_role\" %q {\n  name = %q\n}\n", lbl, util.EscapeHCLTemplate(dataBlocks[lbl]))
+	}
+	_ = os.WriteFile(path, []byte(strings.Join(lines, "\n")+b.String()), 0o644)
 	return n
 }
 
