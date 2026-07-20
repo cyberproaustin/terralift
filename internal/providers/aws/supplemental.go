@@ -14,6 +14,100 @@ import (
 // writing an enumerator and calling it.
 func enumSupplemental(ctx context.Context, run *core.Run, inv *model.Inventory) {
 	enumSecurityHub(ctx, run, inv)
+	enumOrganizations(ctx, run, inv)
+}
+
+// enumOrganizations injects AWS Organizations resources, which Resource Explorer
+// does not index: the organization, its OUs (recursively), custom (non-AWS-managed)
+// policies, and member accounts. All are global. No-op if the account is not part
+// of an organization. The management account is skipped — it is the org owner, not
+// a manageable member resource. All import by their native id (o-/ou-/p-/account id),
+// which is stored as the resource ID, so no import-id override is needed.
+func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory) {
+	var org struct {
+		Organization struct {
+			Id              string `json:"Id"`
+			MasterAccountId string `json:"MasterAccountId"`
+		} `json:"Organization"`
+	}
+	if err := runAws(ctx, &org, "organizations", "describe-organization"); err != nil || org.Organization.Id == "" {
+		return // not in an organization (or no access)
+	}
+	add := func(id, name, tfType, nativeSuffix string) {
+		inv.Resources[strings.ToLower(id)] = &model.Resource{
+			ID: id, Name: name, NativeType: "organizations:" + nativeSuffix,
+			TFType: tfType, Container: "global", Source: "supplemental",
+		}
+	}
+	added := 1
+	add(org.Organization.Id, "organization", "aws_organizations_organization", "organization")
+
+	var roots struct {
+		Roots []struct {
+			Id string `json:"Id"`
+		} `json:"Roots"`
+	}
+	if runAws(ctx, &roots, "organizations", "list-roots") == nil {
+		for _, root := range roots.Roots {
+			added += enumOrgOUs(ctx, inv, root.Id, add)
+		}
+	}
+
+	for _, ptype := range []string{"SERVICE_CONTROL_POLICY", "TAG_POLICY", "BACKUP_POLICY", "AISERVICES_OPT_OUT_POLICY"} {
+		var pols struct {
+			Policies []struct {
+				Id         string `json:"Id"`
+				Name       string `json:"Name"`
+				AwsManaged bool   `json:"AwsManaged"`
+			} `json:"Policies"`
+		}
+		if runAws(ctx, &pols, "organizations", "list-policies", "--filter", ptype) == nil {
+			for _, p := range pols.Policies {
+				if p.AwsManaged {
+					continue // AWS-managed (e.g. FullAWSAccess) is not onboardable
+				}
+				add(p.Id, p.Name, "aws_organizations_policy", "policy")
+				added++
+			}
+		}
+	}
+
+	var accts struct {
+		Accounts []struct {
+			Id   string `json:"Id"`
+			Name string `json:"Name"`
+		} `json:"Accounts"`
+	}
+	if runAws(ctx, &accts, "organizations", "list-accounts") == nil {
+		for _, a := range accts.Accounts {
+			if a.Id == org.Organization.MasterAccountId {
+				continue // the management account is not a manageable member resource
+			}
+			add(a.Id, a.Name, "aws_organizations_account", "account")
+			added++
+		}
+	}
+	run.Log.Info("Enumerate", "supplemental (Organizations): %d resource(s)", added)
+}
+
+// enumOrgOUs recursively injects the OUs under parentID and returns the count added.
+func enumOrgOUs(ctx context.Context, inv *model.Inventory, parentID string, add func(id, name, tfType, nativeSuffix string)) int {
+	var ous struct {
+		OrganizationalUnits []struct {
+			Id   string `json:"Id"`
+			Name string `json:"Name"`
+		} `json:"OrganizationalUnits"`
+	}
+	if err := runAws(ctx, &ous, "organizations", "list-organizational-units-for-parent", "--parent-id", parentID); err != nil {
+		return 0
+	}
+	n := 0
+	for _, ou := range ous.OrganizationalUnits {
+		add(ou.Id, ou.Name, "aws_organizations_organizational_unit", "ou")
+		n++
+		n += enumOrgOUs(ctx, inv, ou.Id, add)
+	}
+	return n
 }
 
 // inventoryRegions returns the distinct AWS regions present in the floor (falling
