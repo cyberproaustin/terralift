@@ -17,8 +17,9 @@ Builds a cloud-neutral inventory of what is running. Each cloud has a different 
 - AWS reads from Resource Explorer.
 - GCP reads from Cloud Asset Inventory, which returns metadata and full resource configuration in a single sweep.
 - Azure reads from Resource Graph.
+- GitHub reads from the GitHub API via the `gh` CLI.
 
-Enumeration also collects IAM bindings and public-exposure signals, such as a firewall open to the internet or an object made public. The result is written to `inventory.json`, so later phases can reload it.
+Enumeration also collects IAM bindings and public-exposure signals, such as a firewall open to the internet or an object made public — for the clouds that have such planes. A flat provider like GitHub declares it has no IAM or exposure plane, so those reports read "not applicable" rather than "checked, found nothing." The result is written to `inventory.json`, so later phases can reload it.
 
 Each enumerated resource is classified into a Terraform type. Most map one to one, but a cloud's inventory sometimes reports several distinct resources under a single type. TerraLift disambiguates these from the resource's own attributes: a GCP load-balancer component is resolved to its regional or global Terraform type by location, and an AWS `rds:cluster` is resolved to Aurora, DocumentDB, or Neptune by its engine.
 
@@ -30,7 +31,7 @@ Turns the inventory into born-correct Terraform. Two things happen here.
 
 First, TerraLift authors an `import` block for each resource. It picks a stable, readable address (for example `google_compute_network.prod_vpc`, not a random hash) and derives the correct import ID for that resource type from the cloud's own identifiers. Born-correct means the names and IDs are right the first time, so you do not have to rename resources or fix import IDs by hand.
 
-Second, it generates the resource HCL. On AWS and GCP this uses `terraform plan -generate-config-out`, then curates the result to drop provider defaults that the generator over-emits. On Azure it uses `aztfexport`.
+Second, it generates the resource HCL. On AWS, GCP, and GitHub this uses `terraform plan -generate-config-out`, then curates the result to drop provider defaults that the generator over-emits (and to author back attributes the generator wrongly drops — a repository's download setting, or a webhook's URL that it marks sensitive). On Azure it uses `aztfexport`.
 
 ### Phase 4: Reconcile
 
@@ -88,7 +89,11 @@ Some attributes are write-only, meaning the cloud accepts them at create time bu
 
 Azure uses `aztfexport`, which adopts resources by importing them into a Terraform state file rather than by emitting import blocks. That state file can contain data-plane secrets, so TerraLift does not ship it. Instead, TerraLift reads the addresses and resource IDs out of that state and generates its own `import.tf`, so the shipped repository adopts the resources the same way the AWS and GCP output does, without ever carrying the state. Azure RBAC is authored to `roleassignments.tf` with its own import blocks.
 
-## Clone mode and its limits
+### GitHub
+
+GitHub is a flat provider: the scope is a single organization or user login, and everything lands in one stack — there are no regions, resource groups, or projects to lay out. The scope resolves to whichever the login is, so the same command adopts either an org or a personal account. Authentication uses the token the `gh` CLI is already signed in with, published to the environment so Terraform authenticates without a token ever being written into the generated config.
+
+Coverage is repositories (with their webhooks and branch protection), organization membership, teams and team membership, and organization webhooks. Two GitHub-specific rules keep the output honest. First, GitHub auto-creates nine default issue labels in every repository; those are skipped, so only labels you created are adopted. Second, an Actions secret's value is write-only — the API never returns it — so a secret cannot be adopted plan-clean, and adopting one with a placeholder value would overwrite the real secret on the first apply. TerraLift surfaces secrets so you know they exist but leaves them unadopted, to be managed out-of-band with the value supplied at apply time. Enumerating org webhooks and teams needs the `admin:org_hook` and `admin:org` token scopes respectively; without them, those resources are skipped with a note rather than failing the run.
 
 Clone mode (`terralift clone`) produces a portable copy. Scope-specific attributes such as the project, region, or resource group become variables, resource names get an optional prefix and suffix so globally unique names do not collide, and the import blocks are dropped so `terraform apply` creates the resources in a new scope.
 

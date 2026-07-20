@@ -13,11 +13,12 @@ Every run needs:
 
 Then, for the cloud you are onboarding:
 
-| Cloud | Required tools |
-|-------|----------------|
+| Provider | Required tools |
+|----------|----------------|
 | GCP | `gcloud` (the Google Cloud CLI) |
 | AWS | `aws` (the AWS CLI v2) |
 | Azure | `az` (the Azure CLI) and `aztfexport` |
+| GitHub | `gh` (the GitHub CLI) |
 
 Install `aztfexport` from Microsoft:
 
@@ -74,6 +75,23 @@ export ARM_SUBSCRIPTION_ID=00000000-0000-0000-0000-000000000000
 ```
 
 Enumeration reads from Azure Resource Graph, which is available by default. The export step uses `aztfexport`, which imports resources into a local state file, so your identity needs Reader on the subscription or the resource groups you target.
+
+### GitHub
+
+Sign in with the GitHub CLI. TerraLift uses the token `gh` holds; the Terraform provider inherits it from the environment, so no token is written into the generated config.
+
+```
+gh auth login
+gh auth status   # confirm you are authenticated
+```
+
+The scope is an organization or a user login (`--scope my-org`; it defaults to your own account). The default `repo` and `read:org` scopes cover repositories and membership. To also adopt organization webhooks or teams, add their scopes:
+
+```
+gh auth refresh -s admin:org_hook,admin:org
+```
+
+Without those scopes, org webhooks and teams are skipped with a note rather than failing the run.
 
 ## 3. Run your first onboarding
 

@@ -1,6 +1,6 @@
 # TerraLift
 
-TerraLift brings infrastructure you already run in the cloud under Terraform management. You point it at an AWS account, a GCP project, or an Azure subscription, and it produces a clean Terraform repository that adopts those resources as they exist right now. Running `terraform plan` on the output is a clean import: zero resources to add, zero to change, zero to destroy.
+TerraLift brings infrastructure you already run under Terraform management. You point it at an AWS account, a GCP project, an Azure subscription, or a GitHub organization, and it produces a clean Terraform repository that adopts those resources as they exist right now. Running `terraform plan` on the output is a clean import: zero resources to add, zero to change, zero to destroy.
 
 It is built for brownfield environments. That means infrastructure created by hand, by ClickOps in a console, by a one-off script, or by a different tool, which now needs to live in version-controlled Terraform without a risky rebuild.
 
@@ -59,7 +59,7 @@ terralift banner
 
 ## Quick start
 
-Each cloud needs its own CLI installed and authenticated, and every run needs Terraform on your `PATH`. The exact setup per cloud is in [Getting Started](docs/getting-started.md). Once you are authenticated, one command does the whole run:
+Each provider needs its own CLI installed and authenticated, and every run needs Terraform on your `PATH`. The exact setup per provider is in [Getting Started](docs/getting-started.md). Once you are authenticated, one command does the whole run:
 
 ```
 # GCP: scope is the project ID
@@ -70,6 +70,9 @@ terralift onboard --cloud aws --scope 123456789012
 
 # Azure: scope is the subscription ID
 terralift onboard --cloud azure --scope 00000000-0000-0000-0000-000000000000
+
+# GitHub: scope is an organization or user login
+terralift onboard --cloud github --scope my-org
 ```
 
 TerraLift writes everything under `artifacts/<run-id>/`. The Terraform repository is in `repo/` and the reports are in `reports/`.
@@ -141,15 +144,18 @@ terralift clone --cloud gcp --scope my-project-id
 
 Clone mode is useful for disaster-recovery templates, spinning up a matching staging environment, or moving a workload between projects, subscriptions, or accounts.
 
-## Supported clouds
+## Supported providers
 
-| Cloud | Enumeration source | Export engine |
-|-------|--------------------|---------------|
-| AWS | Resource Explorer | `terraform plan -generate-config-out` |
-| GCP | Cloud Asset Inventory | `terraform plan -generate-config-out` |
-| Azure | Resource Graph | aztfexport |
+| Provider | Scope | Enumeration source | Export engine |
+|----------|-------|--------------------|---------------|
+| AWS | account | Resource Explorer | `terraform plan -generate-config-out` |
+| GCP | project | Cloud Asset Inventory | `terraform plan -generate-config-out` |
+| Azure | subscription | Resource Graph | aztfexport |
+| GitHub | organization or user | GitHub API (`gh`) | `terraform plan -generate-config-out` |
 
-Coverage spans the common control-plane resource types across each cloud (networking, compute, storage, databases, IAM, load balancing, serverless, containers, CI/CD), and extends to services the cloud inventory does not index, such as AWS SecurityHub, Organizations, and Identity Center, through direct API enumeration.
+Cloud coverage spans the common control-plane resource types across each cloud (networking, compute, storage, databases, IAM, load balancing, serverless, containers, CI/CD), and extends to services the cloud inventory does not index, such as AWS SecurityHub, Organizations, and Identity Center, through direct API enumeration.
+
+GitHub is the first non-hyperscaler provider: a flat platform with no regions, no ARNs, and no cloud-IAM plane. It covers repositories (with webhooks and branch protection), organization membership, teams and team membership, and organization webhooks. Custom issue labels are adopted; GitHub's auto-created default labels are skipped as noise, and Actions secrets are surfaced but left unadopted because their values are write-only. Supporting a provider this different from AWS/GCP/Azure is what the framework's cloud-neutral model is built for — the same born-correct import + plan-clean guarantee holds.
 
 ## Documentation
 
