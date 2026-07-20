@@ -34,7 +34,7 @@ func TestIntegrationAWS(t *testing.T) {
 	account := awsAccountID(t)
 
 	// Stand up the seed and guarantee teardown (t.Cleanup destroys it).
-	terraformSeed(t, "seeds/aws")
+	terraformSeed(t, "seeds/aws", nil)
 
 	// The seed exercises networking rewiring (VPC/subnet/SG), IAM roles, a Step
 	// Functions state machine and a CodeBuild project — the latter two also drive
@@ -55,7 +55,7 @@ func TestIntegrationAWS(t *testing.T) {
 	}, 8*time.Minute)
 
 	deadline := time.Now().Add(15 * time.Minute)
-	rep, run := onboardUntil(t, "aws", account, deadline, wantTypes...)
+	rep, run := onboardUntil(t, "aws", account, nil, deadline, wantTypes)
 
 	// The account round-trips with no drift and no failed stacks...
 	rep.assertClean(t)

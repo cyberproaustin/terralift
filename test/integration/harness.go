@@ -142,16 +142,17 @@ func assertOnboarded(t *testing.T, run string, tfTypes ...string) {
 	}
 }
 
-// onboardUntil re-runs onboard until every wantType appears in the generated repo
-// or the deadline passes, then returns the last report and run dir. Retries absorb
-// Resource Explorer's eventual-consistency lag on freshly-created resources (a
-// single sweep can miss a resource that a later sweep indexes). The account
-// invariant (assertClean) is unaffected by the lag and is checked by the caller on
-// whatever run is returned.
-func onboardUntil(t *testing.T, cloud, scope string, deadline time.Time, wantTypes ...string) (correctnessReport, string) {
+// onboardUntil re-runs onboard (with the given extra flags) until every wantType
+// appears in the generated repo or the deadline passes, then returns the last
+// report and run dir. Retries absorb the eventual-consistency lag every cloud's
+// enumeration source has on freshly-created resources (AWS Resource Explorer, GCP
+// Cloud Asset Inventory, Azure Resource Graph) — a single sweep can miss a resource
+// that a later sweep indexes. The scope invariant (assertClean) is unaffected by the
+// lag and is checked by the caller on whatever run is returned.
+func onboardUntil(t *testing.T, cloud, scope string, extra []string, deadline time.Time, wantTypes []string) (correctnessReport, string) {
 	t.Helper()
 	for attempt := 1; ; attempt++ {
-		rep, run := onboard(t, cloud, scope)
+		rep, run := onboard(t, cloud, scope, extra...)
 		if repoHasAll(run, wantTypes...) {
 			t.Logf("all seed types present after %d onboard attempt(s)", attempt)
 			return rep, run
@@ -165,9 +166,10 @@ func onboardUntil(t *testing.T, cloud, scope string, deadline time.Time, wantTyp
 	}
 }
 
-// terraformSeed copies the .tf files from seedDir into a temp dir, applies them,
-// and registers a `terraform destroy` cleanup so the seed is always torn down.
-func terraformSeed(t *testing.T, seedDir string) {
+// terraformSeed copies the .tf files from seedDir into a temp dir, applies them
+// with the given input variables, and registers a `terraform destroy` cleanup so
+// the seed is always torn down. Pass nil vars when the seed takes none.
+func terraformSeed(t *testing.T, seedDir string, vars map[string]string) {
 	t.Helper()
 	tmp := t.TempDir()
 	entries, err := os.ReadDir(seedDir)
@@ -182,6 +184,10 @@ func terraformSeed(t *testing.T, seedDir string) {
 			}
 		}
 	}
+	varArgs := make([]string, 0, len(vars)*2)
+	for k, v := range vars {
+		varArgs = append(varArgs, "-var", k+"="+v)
+	}
 	tf := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("terraform", args...)
 		cmd.Dir = tmp
@@ -191,11 +197,11 @@ func terraformSeed(t *testing.T, seedDir string) {
 	if out, err := tf("init", "-no-color"); err != nil {
 		t.Fatalf("terraform init: %v\n%s", err, out)
 	}
-	if out, err := tf("apply", "-auto-approve", "-no-color"); err != nil {
+	if out, err := tf(append([]string{"apply", "-auto-approve", "-no-color"}, varArgs...)...); err != nil {
 		t.Fatalf("terraform apply: %v\n%s", err, out)
 	}
 	t.Cleanup(func() {
-		if out, err := tf("destroy", "-auto-approve", "-no-color"); err != nil {
+		if out, err := tf(append([]string{"destroy", "-auto-approve", "-no-color"}, varArgs...)...); err != nil {
 			t.Errorf("terraform destroy (manual cleanup may be needed): %v\n%s", err, out)
 		}
 	})
