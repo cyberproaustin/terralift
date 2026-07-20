@@ -74,6 +74,21 @@ func TestCurateLBListenerDropsForward(t *testing.T) {
 	}
 }
 
+func TestZeroOverEmitPrune(t *testing.T) {
+	// Invalid over-emitted zeros must be dropped; real (non-zero) values kept, and an
+	// unrelated legitimate zero (e.g. desired_capacity = 0) must NOT match.
+	for _, l := range []string{"  concurrent_build_limit = 0", "      timeout_in_minutes = 0"} {
+		if !zeroOverEmit.MatchString(l) {
+			t.Errorf("should drop: %q", l)
+		}
+	}
+	for _, l := range []string{"  concurrent_build_limit = 5", "  timeout_in_minutes = 60", "  desired_capacity = 0", "  min_size = 0"} {
+		if zeroOverEmit.MatchString(l) {
+			t.Errorf("should keep: %q", l)
+		}
+	}
+}
+
 func TestCurateAutoScalingGroup(t *testing.T) {
 	out, _ := curate(t, "aws_autoscaling_group",
 		`  availability_zones  = ["us-east-1a"]`,

@@ -317,6 +317,12 @@ var emptyCIDR = regexp.MustCompile(`^\s*(cidr_block|ipv6_cidr_block)\s*=\s*""\s*
 // outpost_arn). Dropping the whole group lets the provider apply real defaults.
 var overEmitAttr = regexp.MustCompile(`^\s*(map_customer_owned_ip_on_launch|customer_owned_ipv4_pool|outpost_arn|availability_zone_id|ipv6_netmask_length|ipv6_ipam_pool_id|recovery_period_in_days|enable_lni_at_device_index|signature_version|name_prefix|datapoints_to_alarm|rotation_period_in_days)\s*=`)
 
+// zeroOverEmit matches attributes -generate-config-out emits as 0 when unset, where
+// 0 is below the schema's minimum and fails validation (codebuild
+// concurrent_build_limit >= 1; codepipeline action timeout_in_minutes 5-86400). A
+// real non-zero value is kept; dropping the zero lets the provider apply its default.
+var zeroOverEmit = regexp.MustCompile(`^\s*(concurrent_build_limit|timeout_in_minutes)\s*=\s*0\s*$`)
+
 func pruneGeneratedHCL(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -326,7 +332,7 @@ func pruneGeneratedHCL(path string) int {
 	out := make([]string, 0, len(lines))
 	n := 0
 	for _, l := range lines {
-		if emptyAttr.MatchString(l) || overEmitAttr.MatchString(l) || emptyCIDR.MatchString(l) || generatedComment.MatchString(l) {
+		if emptyAttr.MatchString(l) || overEmitAttr.MatchString(l) || emptyCIDR.MatchString(l) || generatedComment.MatchString(l) || zeroOverEmit.MatchString(l) {
 			n++
 			continue
 		}

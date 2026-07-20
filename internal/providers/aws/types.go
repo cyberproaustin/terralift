@@ -34,6 +34,10 @@ var awsTypeToTF = map[string]string{
 	// autoscaling / orchestration
 	"autoscaling:autoscalinggroup": "aws_autoscaling_group",
 	"states:statemachine":          "aws_sfn_state_machine",
+	// ci/cd
+	"codebuild:project":      "aws_codebuild_project",
+	"codedeploy:application": "aws_codedeploy_app",
+	"codepipeline:pipeline":  "aws_codepipeline",
 	// data
 	"rds:db":              "aws_db_instance",
 	"rds:cluster":         "aws_rds_cluster",
