@@ -25,7 +25,7 @@ import (
 // DryReport is the "--dry-run" output: detect and report only, write no repo.
 // It produces the hygiene report and an enumeration/coverage preview from the
 // inventory alone (no export, no generated HCL, no package).
-func DryReport(run *core.Run, inv *model.Inventory) {
+func DryReport(run *core.Run, inv *model.Inventory, caps provider.Capabilities) {
 	mapped := 0
 	for _, r := range inv.Resources {
 		if r.TFType != "" {
@@ -34,7 +34,7 @@ func DryReport(run *core.Run, inv *model.Inventory) {
 	}
 	hyg := reconcile.Hygiene(inv)
 	_ = core.WriteJSON(filepath.Join(run.Paths.Reports, "hygiene.json"), hyg)
-	writeMarkdown(filepath.Join(run.Paths.Reports, "hygiene.md"), hygieneMD(hyg))
+	writeMarkdown(filepath.Join(run.Paths.Reports, "hygiene.md"), hygieneMD(hyg, caps.IAM || caps.Exposure))
 	run.Log.Info("DryRun", "enumerated %d resources (%d tf-mapped, %d unmapped) — no repo written",
 		len(inv.Resources), mapped, len(inv.Resources)-mapped)
 	run.Log.Info("DryRun", "hygiene: %d privileged (%d human), %d publicly exposed -> %s",
@@ -42,7 +42,7 @@ func DryReport(run *core.Run, inv *model.Inventory) {
 }
 
 // Reconcile (Phase 4): coverage gap, hygiene report, reference rewire, /live layout.
-func Reconcile(ctx context.Context, run *core.Run, inv *model.Inventory, export *provider.ExportResult, tmpl provider.ProviderTemplates) error {
+func Reconcile(ctx context.Context, run *core.Run, inv *model.Inventory, export *provider.ExportResult, tmpl provider.ProviderTemplates, caps provider.Capabilities) error {
 	// --- coverage (sorted enumeration for stable diffs; excluded != gap) ---
 	enumIDs := make([]string, 0, len(inv.Resources))
 	meta := make(map[string]reconcile.MissingResource, len(inv.Resources))
@@ -62,10 +62,10 @@ func Reconcile(ctx context.Context, run *core.Run, inv *model.Inventory, export 
 	run.Log.Info("Reconcile", "coverage: %d/%d considered exported (%.1f%%), %d excluded, %d gap",
 		cov.Covered, cov.Considered, cov.CoveragePct, cov.Excluded, cov.Gap)
 
-	// --- hygiene ---
+	// --- hygiene (only meaningful where the provider has an IAM/exposure plane) ---
 	hyg := reconcile.Hygiene(inv)
 	_ = core.WriteJSON(filepath.Join(run.Paths.Reports, "hygiene.json"), hyg)
-	writeMarkdown(filepath.Join(run.Paths.Reports, "hygiene.md"), hygieneMD(hyg))
+	writeMarkdown(filepath.Join(run.Paths.Reports, "hygiene.md"), hygieneMD(hyg, caps.IAM || caps.Exposure))
 	run.Log.Info("Reconcile", "hygiene: %d privileged (%d human), %d publicly exposed",
 		hyg.PrivilegedBindings, hyg.HumanPrivileged, hyg.PubliclyExposed)
 
@@ -674,9 +674,16 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func hygieneMD(h reconcile.HygieneReport) string {
+func hygieneMD(h reconcile.HygieneReport, applicable bool) string {
 	var b strings.Builder
-	b.WriteString("# Hygiene / Lockdown Report\n\n## Actions\n")
+	b.WriteString("# Hygiene / Lockdown Report\n\n")
+	if !applicable {
+		b.WriteString("_Not applicable for this provider: it has no cloud IAM plane or " +
+			"network-exposure surface to assess. Access control for this provider is " +
+			"captured as ordinary resources in the generated Terraform._\n")
+		return b.String()
+	}
+	b.WriteString("## Actions\n")
 	if len(h.Actions) == 0 {
 		b.WriteString("- None — already locked down.\n")
 	}

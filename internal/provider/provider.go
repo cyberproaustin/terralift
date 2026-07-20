@@ -30,6 +30,32 @@ type CloudProvider interface {
 
 	// Templates returns provider.tf / backend.tf / pipeline for the package phase.
 	Templates() ProviderTemplates
+
+	// Capabilities declares which cross-cutting analyses are meaningful for this
+	// cloud, so the shared reports don't misrepresent a provider that has no such
+	// plane (e.g. a flat SaaS provider with no IAM/network-exposure plane).
+	Capabilities() Capabilities
+}
+
+// Capabilities declares which cross-cutting, hyperscaler-shaped analyses apply to
+// a provider. The built-in clouds set all true; a flat SaaS/platform provider
+// (Datadog, GitHub, ...) sets the ones it lacks to false so hygiene/exposure are
+// reported as "not applicable" rather than "checked, found nothing."
+type Capabilities struct {
+	// IAM: the provider populates a distinct access-control plane
+	// (inv.IAM / per-resource IAM) that the hygiene report reasons about.
+	IAM bool
+	// Exposure: the provider populates per-resource public-reachability signals.
+	Exposure bool
+	// Hierarchy: the scope has meaningful sub-containers (regions / resource
+	// groups / projects). False means a single flat stack.
+	Hierarchy bool
+}
+
+// HyperscalerCapabilities is the all-true set the built-in clouds (AWS/GCP/Azure)
+// declare: they have an IAM plane, network exposure, and a container hierarchy.
+func HyperscalerCapabilities() Capabilities {
+	return Capabilities{IAM: true, Exposure: true, Hierarchy: true}
 }
 
 // DependencyReport is the outcome of the preflight tool/API check.

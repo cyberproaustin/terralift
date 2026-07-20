@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/cyberproaustin/terralift/internal/enumkit"
 )
 
 // azBin resolves the az executable (az.cmd on Windows).
@@ -45,9 +47,7 @@ type graphResponse struct {
 // graphQuery runs an Azure Resource Graph (KQL) query with SkipToken paging.
 // -First max is 1000; 'id' must stay in the projection for a SkipToken to return.
 func graphQuery(ctx context.Context, subscription, query string) ([]map[string]any, error) {
-	var all []map[string]any
-	skip := ""
-	for {
+	return enumkit.Paginate(func(skip string) ([]map[string]any, string, error) {
 		args := []string{"graph", "query", "-q", query, "--first", "1000"}
 		if subscription != "" {
 			args = append(args, "--subscriptions", subscription)
@@ -57,13 +57,8 @@ func graphQuery(ctx context.Context, subscription, query string) ([]map[string]a
 		}
 		var resp graphResponse
 		if err := runAz(ctx, &resp, args...); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		all = append(all, resp.Data...)
-		if resp.SkipToken == "" {
-			break
-		}
-		skip = resp.SkipToken
-	}
-	return all, nil
+		return resp.Data, resp.SkipToken, nil
+	})
 }

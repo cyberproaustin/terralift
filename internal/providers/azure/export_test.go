@@ -68,24 +68,6 @@ func TestSortedContainers(t *testing.T) {
 	}
 }
 
-func TestScanResourceAddrs(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "main.tf"), []byte(`
-resource "azurerm_resource_group" "rg1" {
-  name = "x"
-}
-resource "azurerm_storage_account" "acct" {}
-`), 0o644)
-	os.WriteFile(filepath.Join(dir, "provider.tf"), []byte(`provider "azurerm" { features {} }`), 0o644)
-	got := scanResourceAddrs(dir)
-	if !got["azurerm_resource_group.rg1"] || !got["azurerm_storage_account.acct"] {
-		t.Errorf("missing expected addresses: %v", got)
-	}
-	if len(got) != 2 {
-		t.Errorf("scanResourceAddrs found %d, want 2: %v", len(got), got)
-	}
-}
-
 func TestWriteImportBlocksFromState(t *testing.T) {
 	dir := t.TempDir()
 	// A resource "id" with a template marker (must be escaped); a data resource (must

@@ -21,6 +21,8 @@ type Provider struct{}
 
 func (p *Provider) Name() string { return "aws" }
 
+func (p *Provider) Capabilities() provider.Capabilities { return provider.HyperscalerCapabilities() }
+
 func (p *Provider) CheckDependencies(ctx context.Context, run *core.Run) (*provider.DependencyReport, error) {
 	return checkDependencies(ctx, run)
 }

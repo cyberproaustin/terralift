@@ -31,6 +31,9 @@ var awsTypeToTF = map[string]string{
 	"ec2:image":       "aws_ami",
 	"s3:bucket":       "aws_s3_bucket",
 	"lambda:function": "aws_lambda_function",
+	// autoscaling / orchestration
+	"autoscaling:autoscalinggroup": "aws_autoscaling_group",
+	"states:statemachine":          "aws_sfn_state_machine",
 	// data
 	"rds:db":              "aws_db_instance",
 	"rds:cluster":         "aws_rds_cluster",

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/cyberproaustin/terralift/internal/enumkit"
 )
 
 // awsBin resolves the aws executable (aws.exe on Windows).
@@ -63,9 +65,7 @@ type reSearchResponse struct {
 // can see; the aggregator index (if promoted) makes this cross-region. region,
 // when set, targets the region that holds the aggregator index.
 func reSearch(ctx context.Context, region, query string) ([]reResource, error) {
-	var all []reResource
-	token := ""
-	for {
+	return enumkit.Paginate(func(token string) ([]reResource, string, error) {
 		args := []string{"resource-explorer-2", "search", "--query-string", query, "--max-results", "1000"}
 		if region != "" {
 			args = append(args, "--region", region)
@@ -75,15 +75,10 @@ func reSearch(ctx context.Context, region, query string) ([]reResource, error) {
 		}
 		var resp reSearchResponse
 		if err := runAws(ctx, &resp, args...); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		all = append(all, resp.Resources...)
-		if resp.NextToken == "" {
-			break
-		}
-		token = resp.NextToken
-	}
-	return all, nil
+		return resp.Resources, resp.NextToken, nil
+	})
 }
 
 // stsAccount returns the caller's AWS account id.

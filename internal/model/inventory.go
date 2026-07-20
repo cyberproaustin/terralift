@@ -6,7 +6,10 @@ package model
 
 import "time"
 
-// ScopeType is a cloud's enumeration/isolation boundary.
+// ScopeType is a cloud's enumeration/isolation boundary. It is an open string,
+// not a closed enum: a provider declares its own scope type. The constants below
+// are the ones the built-in clouds use; a flat provider (a SaaS tenant with no
+// sub-scoping) uses ScopeTenant or ScopeGlobal.
 type ScopeType string
 
 const (
@@ -15,6 +18,8 @@ const (
 	ScopeOrganization ScopeType = "organization" // GCP org
 	ScopeSubscription ScopeType = "subscription" // Azure subscription
 	ScopeAccount      ScopeType = "account"      // AWS account
+	ScopeTenant       ScopeType = "tenant"       // flat SaaS/platform tenant (the whole org is the scope)
+	ScopeGlobal       ScopeType = "global"       // no meaningful sub-scoping
 )
 
 // Scope is a normalized enumeration target, e.g. {project, my-proj-id}.

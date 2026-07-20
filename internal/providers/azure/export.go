@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -121,7 +120,7 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 		if strings.Contains(out, "no resource found") {
 			return nil, nil // benign: RG has no aztfexport-importable resources
 		}
-		run.Log.Verbose("Export", "%s", tail(out, 20))
+		run.Log.Verbose("Export", "%s", hcl.Tail(out, 20))
 		return nil, fmt.Errorf("generate mapping: %w", err)
 	}
 	raw, err := os.ReadFile(mapPath)
@@ -186,7 +185,7 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 	if out, err := runAztfexport(ctx, dir, args...); err != nil {
 		// Non-fatal: -k means partial success is expected; parse whatever HCL landed.
 		run.Log.Warn("Export", "%s: aztfexport map reported errors (continuing): %v", rg, err)
-		run.Log.Verbose("Export", "%s", tail(out, 20))
+		run.Log.Verbose("Export", "%s", hcl.Tail(out, 20))
 	}
 
 	// 4b. scrub leaked single secrets from main.tf (app config is left intact — it
@@ -200,7 +199,7 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 	// import blocks) so import.tf can be intersected against it: aztfexport runs with
 	// -k (tolerate partial failures), so a resource could land in state but not in the
 	// HCL — an import block for it would fail plan with "import target does not exist".
-	generated := scanResourceAddrs(dir)
+	generated := hcl.ScanAddrsDir(dir)
 
 	// 4c. born-correct import blocks from aztfexport's state. aztfexport adopts by
 	// importing into a state file, which TerraLift never ships (it holds data-plane
@@ -317,7 +316,7 @@ func writeImportBlocksFromState(dir string, generated map[string]bool) (int, err
 					to = fmt.Sprintf("%s[%d]", to, int(k))
 				}
 			}
-			fmt.Fprintf(&b, "import {\n  to = %s\n  id = %q\n}\n\n", to, util.EscapeHCLTemplate(id))
+			b.WriteString(hcl.ImportBlock(to, util.EscapeHCLTemplate(id)))
 			n++
 		}
 	}
@@ -420,31 +419,6 @@ func sortedContainers(inv *model.Inventory) []string {
 	return out
 }
 
-var resourceLabel = regexp.MustCompile(`(?m)^resource\s+"([^"]+)"\s+"([^"]+)"`)
-
-// scanResourceAddrs returns the set of "type.name" addresses declared across all
-// .tf files in dir (aztfexport's generated HCL).
-func scanResourceAddrs(dir string) map[string]bool {
-	out := map[string]bool{}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return out
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		for _, m := range resourceLabel.FindAllStringSubmatch(string(data), -1) {
-			out[m[1]+"."+m[2]] = true
-		}
-	}
-	return out
-}
-
 func writeMapping(path string, m map[string]mappingEntry) error {
 	data, err := json.MarshalIndent(m, "", "\t")
 	if err != nil {
@@ -484,12 +458,4 @@ func withoutEnv(env []string, key string) []string {
 		}
 	}
 	return out
-}
-
-func tail(s string, lines int) string {
-	parts := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	if len(parts) > lines {
-		parts = parts[len(parts)-lines:]
-	}
-	return strings.Join(parts, "\n")
 }

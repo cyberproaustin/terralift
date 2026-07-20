@@ -20,10 +20,10 @@ import (
 
 // runOpts holds the flags shared by `onboard` and `clone`.
 type runOpts struct {
-	cloud, scopeType, scopeID     string
-	artifacts, resourceGroups     string
-	phases, verbosity             string
-	hclOnly, dryRun, noBanner     bool
+	cloud, scopeType, scopeID string
+	artifacts, resourceGroups string
+	phases, verbosity         string
+	hclOnly, dryRun, noBanner bool
 }
 
 func onboardCmd() *cobra.Command {
@@ -143,7 +143,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 		// Dry-run stops before any generating phase: report from the inventory only.
 		if run.DryRun && n >= 3 {
 			if inv != nil {
-				pipeline.DryReport(run, inv)
+				pipeline.DryReport(run, inv, p.Capabilities())
 			}
 			run.Log.Info("", "dry-run complete — detection + reports only, no repo written")
 			return nil
@@ -190,7 +190,7 @@ func runPipeline(ctx context.Context, p provider.CloudProvider, run *core.Run, p
 			if inv == nil || export == nil {
 				return fmt.Errorf("phase 4 needs Phase 2+3 output in-process; run 2,3,4 together")
 			}
-			if err := pipeline.Reconcile(ctx, run, inv, export, p.Templates()); err != nil {
+			if err := pipeline.Reconcile(ctx, run, inv, export, p.Templates(), p.Capabilities()); err != nil {
 				return fmt.Errorf("phase 4 reconcile: %w", err)
 			}
 		case 5:
