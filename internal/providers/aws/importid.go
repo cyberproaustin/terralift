@@ -83,6 +83,12 @@ var importIDOverride = map[string]func(r *model.Resource) string{
 		}
 		return arnName(r.ID)
 	},
+
+	// Identity Center resources import by the composite "identity-store-id/resource-id",
+	// which the supplemental enumerator already stores as the resource ID.
+	"aws_identitystore_user":             byARN,
+	"aws_identitystore_group":            byARN,
+	"aws_identitystore_group_membership": byARN,
 }
 
 // cfnStackName extracts the stack NAME from a CloudFormation stack ARN

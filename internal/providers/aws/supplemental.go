@@ -15,6 +15,75 @@ import (
 func enumSupplemental(ctx context.Context, run *core.Run, inv *model.Inventory) {
 	enumSecurityHub(ctx, run, inv)
 	enumOrganizations(ctx, run, inv)
+	enumIdentityStore(ctx, run, inv)
+}
+
+// enumIdentityStore injects IAM Identity Center identity-store resources, which
+// Resource Explorer does not index: users, groups, and group memberships. No-op if
+// Identity Center is not enabled. Each imports by the COMPOSITE id
+// "identity-store-id/resource-id" (stored as the resource ID; see the byID overrides
+// in importid.go). All global.
+func enumIdentityStore(ctx context.Context, run *core.Run, inv *model.Inventory) {
+	var inst struct {
+		Instances []struct {
+			IdentityStoreId string `json:"IdentityStoreId"`
+		} `json:"Instances"`
+	}
+	if err := runAws(ctx, &inst, "sso-admin", "list-instances"); err != nil || len(inst.Instances) == 0 {
+		return
+	}
+	store := inst.Instances[0].IdentityStoreId
+	if store == "" {
+		return
+	}
+	add := func(resourceID, name, tfType, nativeSuffix string) {
+		id := store + "/" + resourceID // the composite Terraform import id
+		inv.Resources[strings.ToLower(id)] = &model.Resource{
+			ID: id, Name: name, NativeType: "identitystore:" + nativeSuffix,
+			TFType: tfType, Container: "global", Source: "supplemental",
+		}
+	}
+	added := 0
+
+	var users struct {
+		Users []struct {
+			UserId   string `json:"UserId"`
+			UserName string `json:"UserName"`
+		} `json:"Users"`
+	}
+	if runAws(ctx, &users, "identitystore", "list-users", "--identity-store-id", store) == nil {
+		for _, u := range users.Users {
+			add(u.UserId, u.UserName, "aws_identitystore_user", "user")
+			added++
+		}
+	}
+
+	var groups struct {
+		Groups []struct {
+			GroupId     string `json:"GroupId"`
+			DisplayName string `json:"DisplayName"`
+		} `json:"Groups"`
+	}
+	if runAws(ctx, &groups, "identitystore", "list-groups", "--identity-store-id", store) == nil {
+		for _, g := range groups.Groups {
+			add(g.GroupId, g.DisplayName, "aws_identitystore_group", "group")
+			added++
+			var mems struct {
+				GroupMemberships []struct {
+					MembershipId string `json:"MembershipId"`
+				} `json:"GroupMemberships"`
+			}
+			if runAws(ctx, &mems, "identitystore", "list-group-memberships", "--identity-store-id", store, "--group-id", g.GroupId) == nil {
+				for _, m := range mems.GroupMemberships {
+					add(m.MembershipId, g.DisplayName+"-membership", "aws_identitystore_group_membership", "group-membership")
+					added++
+				}
+			}
+		}
+	}
+	if added > 0 {
+		run.Log.Info("Enumerate", "supplemental (Identity Center): %d resource(s)", added)
+	}
 }
 
 // enumOrganizations injects AWS Organizations resources, which Resource Explorer
