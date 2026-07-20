@@ -101,6 +101,52 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 		run.Log.Info("Enumerate", "branch protections: %d", protections)
 	}
 
+	// Per-repo sub-resources: custom issue labels + actions secrets.
+	labels, secrets := 0, 0
+	for _, r := range active {
+		lbls, err := listLabels(ctx, owner, r.Name)
+		if err != nil {
+			run.Log.Verbose("Enumerate", "list labels for %s skipped: %v", r.FullName, err)
+		} else {
+			for _, l := range lbls {
+				if l.Default {
+					continue // GitHub auto-creates 9 default labels; onboarding them is noise
+				}
+				add(inv, &model.Resource{
+					ID:         fmt.Sprintf("%s/labels/%s", r.FullName, l.Name),
+					Name:       r.Name + "-label-" + l.Name,
+					NativeType: "github:issue_label",
+					Container:  owner,
+					Source:     "gh-api",
+					Properties: map[string]any{"repo": r.Name, "label": l.Name},
+				})
+				labels++
+			}
+		}
+		secs, err := listSecrets(ctx, owner, r.Name)
+		if err != nil {
+			run.Log.Verbose("Enumerate", "list actions secrets for %s skipped: %v", r.FullName, err)
+			continue
+		}
+		for _, s := range secs {
+			add(inv, &model.Resource{
+				ID:         fmt.Sprintf("%s/secrets/%s", r.FullName, s.Name),
+				Name:       r.Name + "-secret-" + s.Name,
+				NativeType: "github:actions_secret",
+				Container:  owner,
+				Source:     "gh-api",
+				Properties: map[string]any{"repo": r.Name, "secret_name": s.Name},
+			})
+			secrets++
+		}
+	}
+	if labels > 0 {
+		run.Log.Info("Enumerate", "custom labels: %d", labels)
+	}
+	if secrets > 0 {
+		run.Log.Info("Enumerate", "actions secrets: %d (values are write-only; excluded from adoption)", secrets)
+	}
+
 	// Org-level resources (only when the scope is an organization).
 	if scope.Type == model.ScopeOrganization {
 		enumOrg(ctx, run, inv, owner)
@@ -226,6 +272,34 @@ type protectedBranch struct {
 // wildcard patterns would need the GraphQL branchProtectionRules API).
 func listProtectedBranches(ctx context.Context, owner, repoName string) ([]protectedBranch, error) {
 	return ghAPIList[protectedBranch](ctx, fmt.Sprintf("repos/%s/%s/branches?protected=true&per_page=100", owner, repoName))
+}
+
+type label struct {
+	Name    string `json:"name"`
+	Default bool   `json:"default"`
+}
+
+// listLabels returns a repository's issue labels (default GitHub labels included;
+// the caller filters them out).
+func listLabels(ctx context.Context, owner, repoName string) ([]label, error) {
+	return ghAPIList[label](ctx, fmt.Sprintf("repos/%s/%s/labels?per_page=100", owner, repoName))
+}
+
+type secretName struct {
+	Name string `json:"name"`
+}
+
+// listSecrets returns a repository's Actions secret NAMES (values are never
+// returned by the API — they are write-only). The endpoint nests the array under
+// `.secrets`, so this decodes the object rather than paging a bare array.
+func listSecrets(ctx context.Context, owner, repoName string) ([]secretName, error) {
+	var resp struct {
+		Secrets []secretName `json:"secrets"`
+	}
+	if err := ghAPI(ctx, &resp, fmt.Sprintf("repos/%s/%s/actions/secrets?per_page=100", owner, repoName)); err != nil {
+		return nil, err
+	}
+	return resp.Secrets, nil
 }
 
 // add records a resource, resolving its Terraform type from the native key.

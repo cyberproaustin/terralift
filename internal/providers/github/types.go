@@ -11,6 +11,8 @@ var tfTypeMap = map[string]string{
 	"github:team":                 "github_team",
 	"github:team_membership":      "github_team_membership",
 	"github:organization_webhook": "github_organization_webhook",
+	"github:issue_label":          "github_issue_label",
+	"github:actions_secret":       "github_actions_secret",
 }
 
 // tfType returns the Terraform type for a native key, or "" if unmapped (a gap).

@@ -72,6 +72,27 @@ func TestDeriveImportID(t *testing.T) {
 	if got := deriveImportID(oh); got != "99" {
 		t.Errorf("org webhook import id = %q, want 99", got)
 	}
+	lbl := &model.Resource{TFType: "github_issue_label", Properties: map[string]any{"repo": "r", "label": "bug"}}
+	if got := deriveImportID(lbl); got != "r:bug" {
+		t.Errorf("label import id = %q, want r:bug", got)
+	}
+	sec := &model.Resource{TFType: "github_actions_secret", Properties: map[string]any{"repo": "r", "secret_name": "TOKEN"}}
+	if got := deriveImportID(sec); got != "r/TOKEN" {
+		t.Errorf("secret import id = %q, want r/TOKEN", got)
+	}
+}
+
+func TestExcludedReason(t *testing.T) {
+	// Actions secrets are enumerated but excluded (write-only value).
+	sec := &model.Resource{NativeType: "github:actions_secret"}
+	if excludedReason(sec) == "" {
+		t.Error("actions secret should be excluded from adoption")
+	}
+	// Everything else is adoptable.
+	repo := &model.Resource{NativeType: "github:repository"}
+	if r := excludedReason(repo); r != "" {
+		t.Errorf("repository should not be excluded, got %q", r)
+	}
 }
 
 func TestAuthorWebhookURLs(t *testing.T) {

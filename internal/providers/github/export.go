@@ -39,9 +39,13 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	}
 	var items []item
 	var addrs []naming.Address
-	var gap []string
+	var excluded, gap []string
 	for _, id := range ids {
 		r := inv.Resources[id]
+		if reason := excludedReason(r); reason != "" { // enumerated but intentionally not adopted
+			excluded = append(excluded, r.ID)
+			continue
+		}
 		if r.TFType == "" { // no TF mapping -> genuine coverage gap
 			gap = append(gap, r.ID)
 			continue
@@ -87,7 +91,7 @@ provider "github" {
 `, owner)
 	_ = os.WriteFile(filepath.Join(dir, "providers.tf"), []byte(prov), 0o644)
 
-	run.Log.Info("Export", "%d resource import blocks (%d gap) -> %s", len(items), len(gap), dir)
+	run.Log.Info("Export", "%d resource import blocks (%d excluded, %d gap) -> %s", len(items), len(excluded), len(gap), dir)
 
 	mode := "import"
 	if run.Config.HCLOnly {
@@ -144,8 +148,21 @@ provider "github" {
 		Mode: mode,
 		Containers: []provider.ContainerExport{{
 			Container: owner, Dir: dir, MappedIDs: mapped,
-			GapIDs: gap, AddressByID: refByID,
+			ExcludedIDs: excluded, GapIDs: gap, AddressByID: refByID,
 			ConfigFiles: []string{"generated.tf"}, Redactions: redactions,
 		}},
 	}, nil
+}
+
+// excludedReason returns a non-empty reason when a resource is enumerated but must
+// NOT be adopted. GitHub Actions secrets are the case: the value is write-only (the
+// API never returns it), so no plan-clean config can be produced, and adopting one
+// with a placeholder/variable value would OVERWRITE the real secret on apply. They
+// are surfaced (so the operator knows they exist) but left to be managed
+// out-of-band with the value supplied at apply time.
+func excludedReason(r *model.Resource) string {
+	if r.NativeType == "github:actions_secret" {
+		return "actions secret value is write-only; adopt out-of-band"
+	}
+	return ""
 }

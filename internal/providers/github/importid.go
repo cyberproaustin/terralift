@@ -37,6 +37,16 @@ func deriveImportID(r *model.Resource) string {
 		// Imported by the numeric hook id.
 		id, _ := r.Properties["hook_id"].(string)
 		return id
+	case "github_issue_label":
+		// Imported by "repository:name".
+		repo, _ := r.Properties["repo"].(string)
+		name, _ := r.Properties["label"].(string)
+		return repo + ":" + name
+	case "github_actions_secret":
+		// Imported by "repository/secret_name".
+		repo, _ := r.Properties["repo"].(string)
+		name, _ := r.Properties["secret_name"].(string)
+		return repo + "/" + name
 	default:
 		return r.Name
 	}
