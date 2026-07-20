@@ -21,7 +21,9 @@ func awsBin() string {
 }
 
 // runAws runs `aws <args...> --output json --no-cli-pager` and unmarshals stdout.
-func runAws(ctx context.Context, v any, args ...string) error {
+// It is a package var (not a plain func) so tests can substitute a fake CLI; do
+// not call it concurrently with a test that overrides it.
+var runAws = func(ctx context.Context, v any, args ...string) error {
 	full := append(append([]string{}, args...), "--output", "json", "--no-cli-pager")
 	cmd := exec.CommandContext(ctx, awsBin(), full...)
 	out, err := cmd.Output()
