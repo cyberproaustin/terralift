@@ -74,6 +74,17 @@ func TestCurateLBListenerDropsForward(t *testing.T) {
 	}
 }
 
+func TestCFNStackName(t *testing.T) {
+	arn := "arn:aws:cloudformation:us-east-1:521595302924:stack/tl-val-cfn/05008070-8438-11f1-bcb7-0affdd57e60b"
+	if got := cfnStackName(arn); got != "tl-val-cfn" {
+		t.Errorf("cfnStackName = %q, want tl-val-cfn", got)
+	}
+	// No UUID suffix -> the name segment after "stack/".
+	if got := cfnStackName("arn:aws:cloudformation:us-east-1:acct:stack/only"); got != "only" {
+		t.Errorf("cfnStackName fallback = %q, want only", got)
+	}
+}
+
 func TestZeroOverEmitPrune(t *testing.T) {
 	// Invalid over-emitted zeros must be dropped; real (non-zero) values kept, and an
 	// unrelated legitimate zero (e.g. desired_capacity = 0) must NOT match.

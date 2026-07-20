@@ -172,9 +172,15 @@ func reToResource(r reResource) *model.Resource {
 	if strings.HasPrefix(strings.ToLower(r.ResourceType), "elasticloadbalancing:loadbalancer") {
 		tf = lbTypeFromARN(r.ARN)
 	}
+	name := arnName(r.ARN)
+	// A CloudFormation stack ARN ends in the stack UUID; the human name is the
+	// path segment before it, which is what the born-correct label should use.
+	if strings.EqualFold(r.ResourceType, "cloudformation:stack") {
+		name = cfnStackName(r.ARN)
+	}
 	return &model.Resource{
 		ID:         r.ARN,
-		Name:       arnName(r.ARN),
+		Name:       name,
 		NativeType: r.ResourceType,
 		TFType:     tf,
 		Container:  containerFor(r),

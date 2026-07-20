@@ -38,6 +38,8 @@ var awsTypeToTF = map[string]string{
 	"codebuild:project":      "aws_codebuild_project",
 	"codedeploy:application": "aws_codedeploy_app",
 	"codepipeline:pipeline":  "aws_codepipeline",
+	// iac
+	"cloudformation:stack": "aws_cloudformation_stack",
 	// data
 	"rds:db":              "aws_db_instance",
 	"rds:cluster":         "aws_rds_cluster",

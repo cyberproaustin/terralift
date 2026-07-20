@@ -70,6 +70,21 @@ var importIDOverride = map[string]func(r *model.Resource) string{
 
 	// SQS imports by queue URL, reconstructed from the ARN.
 	"aws_sqs_queue": func(r *model.Resource) string { return sqsURL(r.ID) },
+
+	// A CloudFormation stack imports by its NAME; the ARN's last segment is the
+	// stack UUID, so extract the name from the ARN path.
+	"aws_cloudformation_stack": func(r *model.Resource) string { return cfnStackName(r.ID) },
+}
+
+// cfnStackName extracts the stack NAME from a CloudFormation stack ARN
+// (arn:aws:cloudformation:region:acct:stack/<name>/<uuid>). The ARN's last segment
+// is the stack UUID, but the resource is named and imported by <name>.
+func cfnStackName(arn string) string {
+	parts := strings.Split(arnResource(arn), "/") // "stack/<name>/<uuid>"
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return arnName(arn)
 }
 
 func byARN(r *model.Resource) string { return r.ID }
