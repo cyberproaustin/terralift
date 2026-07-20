@@ -71,6 +71,7 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 
 	enrichDefaults(ctx, run, inv)
 	enrichManagedENIs(ctx, run, inv)
+	enrichRDSEngines(ctx, run, inv)
 	enrichExposure(ctx, run, inv)
 	enrichPrivateZones(ctx, run, inv)
 	markCaller(ctx, run, inv)
@@ -96,6 +97,69 @@ func markCaller(ctx context.Context, run *core.Run, inv *model.Inventory) {
 			r.Properties["tl_caller"] = true
 			run.Log.Info("Enumerate", "excluding the onboarding principal itself: %s", arn)
 		}
+	}
+}
+
+// enrichRDSEngines disambiguates the shared rds:cluster and rds:db Resource Explorer
+// types by database engine. DocumentDB and Neptune are reported under the same rds:*
+// types as Aurora/RDS, so without the engine a DocumentDB cluster would be mapped to
+// aws_rds_cluster, fail to import, and drop to a gap. One describe-db-clusters /
+// describe-db-instances per region (only where such resources exist) resolves it.
+func enrichRDSEngines(ctx context.Context, run *core.Run, inv *model.Inventory) {
+	regions := map[string]bool{}
+	for _, r := range inv.Resources {
+		if r.NativeType == "rds:cluster" || r.NativeType == "rds:db" {
+			reg := r.Location
+			if reg == "" {
+				reg = "us-east-1"
+			}
+			regions[reg] = true
+		}
+	}
+	if len(regions) == 0 {
+		return
+	}
+	engineByARN := map[string]string{}
+	for reg := range regions {
+		var cl struct {
+			DBClusters []struct {
+				Arn    string `json:"DBClusterArn"`
+				Engine string `json:"Engine"`
+			} `json:"DBClusters"`
+		}
+		if err := runAws(ctx, &cl, "rds", "describe-db-clusters", "--region", reg); err == nil {
+			for _, c := range cl.DBClusters {
+				engineByARN[strings.ToLower(c.Arn)] = c.Engine
+			}
+		}
+		var db struct {
+			DBInstances []struct {
+				Arn    string `json:"DBInstanceArn"`
+				Engine string `json:"Engine"`
+			} `json:"DBInstances"`
+		}
+		if err := runAws(ctx, &db, "rds", "describe-db-instances", "--region", reg); err == nil {
+			for _, d := range db.DBInstances {
+				engineByARN[strings.ToLower(d.Arn)] = d.Engine
+			}
+		}
+	}
+	n := 0
+	for _, r := range inv.Resources {
+		switch eng := engineByARN[strings.ToLower(r.ID)]; {
+		case r.NativeType == "rds:cluster" && eng == "docdb":
+			r.TFType = "aws_docdb_cluster"
+			n++
+		case r.NativeType == "rds:cluster" && eng == "neptune":
+			r.TFType = "aws_neptune_cluster"
+			n++
+		case r.NativeType == "rds:db" && eng == "docdb":
+			r.TFType = "aws_docdb_cluster_instance"
+			n++
+		}
+	}
+	if n > 0 {
+		run.Log.Info("Enumerate", "rds engine: reclassified %d DocumentDB/Neptune resource(s)", n)
 	}
 }
 

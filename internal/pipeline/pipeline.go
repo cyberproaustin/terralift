@@ -76,6 +76,13 @@ func Reconcile(ctx context.Context, run *core.Run, inv *model.Inventory, export 
 	stacks := 0
 	usedDirs := map[string]bool{}
 	for _, c := range export.Containers {
+		// A container with nothing adopted (only excluded/gap resources, e.g. an
+		// account's "global" scope with just service-linked roles) has no config to
+		// lay out. Skip it so the correctness oracle doesn't plan an empty stack and
+		// report a false failure.
+		if len(c.MappedIDs) == 0 {
+			continue
+		}
 		// Distinct containers can sanitize to the same directory name (e.g. RG
 		// names differing only by case or punctuation); de-collide so one stack
 		// never overwrites another.
