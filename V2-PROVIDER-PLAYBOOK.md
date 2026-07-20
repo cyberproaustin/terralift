@@ -1,0 +1,217 @@
+# TerraLift v2 Provider Playbook & Tracker
+
+The **execution playbook and cross-session tracker** for building out breadth to
+match Terraformer's 44 providers. This is the operational companion to
+[V2-ROADMAP.md](V2-ROADMAP.md) (which holds the strategy and cost analysis). If you
+are picking this up in a new session, read this file first, then the tracker table
+at the bottom for where we are.
+
+---
+
+## The goal
+
+Match Terraformer's provider breadth while keeping TerraLift's depth (plan-clean,
+curated, verified output). We have four **golden-image** providers to mirror:
+**AWS, GCP, Azure, GitHub**. Forty remain.
+
+## The two-phase model (important — read this)
+
+We are deliberately splitting breadth from depth, because setting up live
+credentials for 40 platforms up front is not realistic.
+
+- **Phase A — Breadth (now).** Build a compiling, review-passed **scaffold** for
+  each provider: enumeration, import-ID derivation, type map, export wiring,
+  provider registration, unit tests. This is committed and pushed. **A Phase-A
+  provider is NOT plan-clean.** Curation — the rules that make generated HCL
+  plan-clean — is derived from *real* `generate-config-out` diffs, which require
+  live credentials. No live run means no curation.
+- **Phase B — Depth (later, one platform at a time as credentials become
+  available).** Stand up a live account, run the round-trip, read the actual plan
+  drift, add curation until plan-clean, tear down. This is where a scaffold earns
+  the quality bar.
+
+**Never describe a Phase-A provider as "done" or "validated."** Commit messages say
+*scaffold*. The tracker marks live validation separately.
+
+---
+
+## The per-provider loop
+
+Repeat this for each provider, one at a time:
+
+1. **Research.** Read Terraformer's provider code at
+   `../terraformer/providers/<name>/` (what resources it enumerates, which native
+   API endpoints, how it pages) plus the corresponding `terraform-provider-<name>`
+   registry docs (resource types and their **import ID formats** — the one thing we
+   cannot get wrong). Produce a build spec: native-key → TF-type map, enumeration
+   endpoints + scope, import-ID format per type, and known curation gotchas
+   (write-only/sensitive attrs, over-emitted computed attrs, dropped-required
+   attrs). Cover the **config layer**; exclude code/data resources (serverless code
+   deploys, object/blob data, media) — TerraLift adopts configuration, not code or
+   data.
+2. **Build.** Mirror the golden pattern (see below). Add the provider package,
+   register it in `cmd/terralift/main.go`, and write unit tests for import IDs and
+   any curation logic.
+3. **Review.** Run a code review and a security review (parallel subagents) over
+   the new package. Remediate real findings.
+4. **Push.** Commit to the v2 branch with an honest `feat(<name>): ... (scaffold)`
+   message. Push.
+5. **Track & advance.** Update the tracker table, then move to the next provider.
+
+## The golden-image pattern to mirror
+
+Every provider implements `internal/provider.CloudProvider`
+(`Name/CheckDependencies/Connect/Enumerate/Export/Templates/Capabilities`) and
+registers via `init()` + a blank import in `cmd/terralift/main.go`. The GitHub
+provider (`internal/providers/github/`) is the reference for a flat, HTTP-API,
+non-hyperscaler provider — the shape most of the 40 take. Its file layout:
+
+| File | Responsibility |
+|------|----------------|
+| `<name>.go` | Provider struct, `init()` registration, `Capabilities`, `Templates` |
+| `<name>cli.go` / `<name>api.go` | The API/CLI wrapper: one substitutable call var (for tests), list+paginate helpers |
+| `preflight.go` | `CheckDependencies` (tools/creds) + `Connect` (resolve & **validate** scope, publish auth env) |
+| `enumerate.go` | Native API calls → `model.Inventory`; per-scope sub-resources |
+| `types.go` | native-key (`<name>:<kind>`) → Terraform type map |
+| `importid.go` | `deriveImportID` per type — **must** wrap the raw id in `util.EscapeHCLTemplate` |
+| `export.go` | import blocks + `providers.tf` → `tf.GenerateConfig` → `hcl.SplitByGenerated` → curate; `excludedReason` seam |
+| `curate.go` | Prune over-emitted attrs, author dropped-required attrs, redact secrets |
+| `<name>_test.go` | Import-id + curation unit tests (fake the API call var) |
+
+Export flow (shared, identical to AWS/GCP/GitHub): derive per-type import IDs →
+write born-correct `import.tf` + a keyless `providers.tf` (auth via env, **never
+inline a token**) → `terraform plan -generate-config-out` → `hcl.SplitByGenerated`
+keeps only import blocks whose config generated (rest are honest gaps) → provider
+curation. Capability defaults for a flat SaaS provider:
+`Capabilities{IAM:false, Exposure:false, Hierarchy:false}`.
+
+Three reusable curation moves (all proven on GitHub):
+- **Prune** computed noise the generator over-emits (`hcl.Prune` with regex rules).
+- **Author** back settable attributes the generator wrongly drops or nulls as
+  sensitive, from live enumeration data (e.g. GitHub webhook URLs) — keeps them
+  managed instead of abandoning them via `ignore_changes`.
+- **Exclude** (via `excludedReason` → `ExcludedIDs`) resources that cannot be
+  adopted plan-clean — e.g. a write-only secret value, where adopting with a
+  placeholder would overwrite the real value on apply. Surface it, don't adopt it.
+
+## Standards / definition of done (Phase A, per provider)
+
+- [ ] `go build ./...`, `go vet ./...`, `gofmt -l` clean; full `go test ./...` green.
+- [ ] Unit tests cover every import-ID format and any curation logic.
+- [ ] Import IDs escaped with `util.EscapeHCLTemplate` (template-injection guard).
+- [ ] Auth via env var only; no token/secret ever written to config, state, or logs.
+- [ ] Scope resolved **and validated** (reject a scope that would silently target
+      the wrong account — the GitHub `user/repos` lesson).
+- [ ] `Capabilities` set honestly; write-only/un-adoptable resources excluded with a
+      reason, not left as misleading gaps.
+- [ ] Code review + security review passed and remediated.
+- [ ] Registered in `cmd/terralift/main.go`, committed, pushed; commit labeled
+      *scaffold*; gotchas/deferred items noted in the commit and this tracker.
+
+## Conventions & hard-won lessons
+
+- **Branch:** all v2 providers accumulate on **`feat/v2-breadth`** (based off the
+  GitHub work). `main` stays at v1.2.1 until we choose to release v2.
+- **Native-key scheme:** `"<provider>:<kind>"` (e.g. `cloudflare:record`).
+- **Escaping:** import IDs embed free text (names, patterns) that can contain
+  `${ }`; `hcl.ImportBlock` uses `%q` which does not neutralize templates. Always
+  `util.EscapeHCLTemplate`. (GitHub HIGH finding.)
+- **Case sensitivity:** key the inventory by the raw id when the platform's ids are
+  case-sensitive (don't blindly `strings.ToLower`). (GitHub finding.)
+- **Shared scaffolding:** as the HTTP-API + token + `generate-config-out` pattern
+  repeats across the SaaS providers, extract common helpers (a shared HTTP-JSON
+  paginator, a generate-config-out export skeleton) so later providers get thinner.
+  Do this opportunistically once ~2-3 confirm the shape; do not pre-abstract.
+- **Kubernetes is the odd one** — in-cluster resources fight the import/scope model;
+  build it last and expect it to need a different approach.
+
+---
+
+## Tracker
+
+Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
+(code+sec review remediated) · `pushed` · `LIVE` (Phase-B plan-clean validated).
+
+### Golden images (reference — already shipped)
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| AWS | LIVE (v1.x) | Resource Explorer + generate-config-out |
+| GCP | LIVE (v1.x) | Cloud Asset Inventory + generate-config-out |
+| Azure | LIVE (v1.x) | Resource Graph + aztfexport |
+| GitHub | LIVE | First non-hyperscaler; `feat/github-provider` (8 commits), plan-clean on user + org scope |
+
+### Batch 1 — GitHub-like (HTTP API + token + generate-config-out)
+
+| # | Provider | Status | Notes |
+|---|----------|--------|-------|
+| 1 | Cloudflare | research | account scope; zones + DNS records beachhead, then rulesets/page rules/LB/access |
+| 2 | DigitalOcean | todo | |
+| 3 | Fastly | todo | |
+| 4 | NS1 | todo | |
+| 5 | Linode | todo | |
+| 6 | Vultr | todo | |
+
+### Batch 2 — SaaS / observability / identity
+
+| # | Provider | Status | Notes |
+|---|----------|--------|-------|
+| 7 | Datadog | todo | |
+| 8 | New Relic | todo | |
+| 9 | Grafana | todo | |
+| 10 | Honeycomb | todo | |
+| 11 | PagerDuty | todo | |
+| 12 | Opsgenie | todo | |
+| 13 | Okta | todo | |
+| 14 | Auth0 | todo | |
+| 15 | LaunchDarkly | todo | |
+| 16 | Keycloak | todo | |
+| 17 | Logz.io | todo | |
+| 18 | Mackerel | todo | |
+| 19 | Vault | todo | |
+
+### Batch 3 — VCS / dev / platform
+
+| # | Provider | Status | Notes |
+|---|----------|--------|-------|
+| 20 | GitLab | todo | |
+| 21 | Azure DevOps | todo | |
+| 22 | Entra ID (azuread) | todo | good dogfood candidate (live tenant) |
+| 23 | Heroku | todo | |
+| 24 | Octopus Deploy | todo | |
+| 25 | commercetools | todo | |
+| 26 | Opal | todo | |
+
+### Batch 4 — Other clouds (CLI/SDK-heavy)
+
+| # | Provider | Status | Notes |
+|---|----------|--------|-------|
+| 27 | AliCloud | todo | |
+| 28 | IBM Cloud | todo | |
+| 29 | IONOS Cloud | todo | |
+| 30 | Tencent Cloud | todo | |
+| 31 | Yandex Cloud | todo | |
+| 32 | OpenStack | todo | |
+| 33 | Equinix Metal | todo | |
+
+### Batch 5 — Niche / special (Kubernetes last)
+
+| # | Provider | Status | Notes |
+|---|----------|--------|-------|
+| 34 | gmailfilter | todo | |
+| 35 | MikroTik (RouterOS) | todo | |
+| 36 | Myra Security | todo | |
+| 37 | PAN-OS (Palo Alto) | todo | |
+| 38 | RabbitMQ | todo | |
+| 39 | Xen Orchestra | todo | |
+| 40 | Kubernetes | todo | build last; may need a different approach |
+
+---
+
+## Current status / session handoff
+
+- **Done & pushed:** GitHub provider (`feat/github-provider`, 8 commits, reviewed +
+  remediated, plan-clean on both user and org scope).
+- **In progress:** Cloudflare (#1) — research phase. Next: build the scaffold
+  (zones + DNS records beachhead), review, push to `feat/v2-breadth`.
+- **Next up after Cloudflare:** DigitalOcean (#2).
