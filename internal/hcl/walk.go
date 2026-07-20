@@ -28,12 +28,12 @@ func WalkResourceBlocks(lines []string, edit BlockEditor) ([]string, []Redaction
 			continue
 		}
 		depth, end := BraceDelta(lines[i]), i
-		for j := i + 1; j < len(lines); j++ {
+		// Guard on depth > 0 so a header that is ALREADY brace-balanced (an empty
+		// single-line `resource "t" "n" {}`, delta 0) is not extended into the next
+		// block. Matches blockRanges() in redact.go.
+		for j := i + 1; depth > 0 && j < len(lines); j++ {
 			depth += BraceDelta(lines[j])
-			if depth <= 0 {
-				end = j
-				break
-			}
+			end = j
 		}
 		block, evs := edit(m[1], lines[i:end+1])
 		events = append(events, evs...)

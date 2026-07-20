@@ -1033,7 +1033,9 @@ func rewireCrossStackRoleRefs(path string, roles map[string]string) int {
 	}
 	declared := hcl.ScanAddrs(string(data)) // roles declared as resources in THIS stack
 	lines := strings.Split(string(data), "\n")
-	dataBlocks := map[string]string{} // data label -> role name
+	labelFor := map[string]string{}   // role name -> data-source label ("" = declared here, skip)
+	dataBlocks := map[string]string{} // data label -> role name (one per distinct name)
+	used := map[string]bool{}         // labels already assigned to a data source
 	n := 0
 	for i, l := range lines {
 		m := crossStackRoleAttrRe.FindStringSubmatch(l)
@@ -1044,12 +1046,29 @@ func rewireCrossStackRoleRefs(path string, roles map[string]string) int {
 		if !ok {
 			continue // not an onboarded role — leave the literal ARN
 		}
-		label := naming.Sanitize(name)
-		if declared["aws_iam_role."+label] {
-			continue // the role is a resource in this stack; a data source would duplicate it
+		label, seen := labelFor[name]
+		if !seen {
+			base := naming.Sanitize(name)
+			if declared["aws_iam_role."+base] {
+				labelFor[name] = "" // the role is a resource in this stack; a data source would duplicate it
+			} else {
+				// Distinct role names can sanitize to the SAME base label (IAM role
+				// names are case/punctuation-sensitive; Sanitize is not). Suffix on
+				// collision so each distinct role gets its own data source; otherwise
+				// a second reference would silently resolve to the wrong role's ARN.
+				label = base
+				for k := 2; used[label]; k++ {
+					label = fmt.Sprintf("%s_%d", base, k)
+				}
+				labelFor[name] = label
+				used[label] = true
+				dataBlocks[label] = name
+			}
+		}
+		if label == "" {
+			continue // declared as a resource in this stack
 		}
 		lines[i] = m[1] + m[2] + m[3] + "data.aws_iam_role." + label + ".arn"
-		dataBlocks[label] = name
 		n++
 	}
 	if n == 0 {
@@ -1141,9 +1160,12 @@ func authorSFNDefinitions(ctx context.Context, path, region string, items []*mod
 	return n
 }
 
-// replaceSFNDefinition rewrites a paren-balanced `definition = jsonencode( ... )`
-// inside an sfn block into `definition = "<escaped literal>"` (raw JSON, with \,
-// " and ${ / %{ neutralized for a double-quoted HCL string).
+// replaceSFNDefinition rewrites a `definition = jsonencode({ ... })` span inside an
+// sfn block into `definition = "<escaped literal>"` (raw JSON, with \, " and ${ / %{
+// neutralized for a double-quoted HCL string). generate-config-out emits the ASL as
+// jsonencode of an HCL object, so the span is tracked by the string/comment-aware
+// hcl.BraceDelta on the wrapped {...} object — NOT by counting parens, which would
+// miscount a ')' or '(' appearing inside an ASL Comment/state-name string value.
 func replaceSFNDefinition(block []string, raw string) ([]string, bool) {
 	esc := strings.ReplaceAll(raw, `\`, `\\`)
 	esc = strings.ReplaceAll(esc, `"`, `\"`)
@@ -1155,9 +1177,9 @@ func replaceSFNDefinition(block []string, raw string) ([]string, bool) {
 		l := block[i]
 		if strings.Contains(l, "definition = jsonencode(") && !replaced {
 			indent := l[:len(l)-len(strings.TrimLeft(l, " \t"))]
-			depth := strings.Count(l, "(") - strings.Count(l, ")")
+			depth := hcl.BraceDelta(l) // string-aware; +1 for the jsonencode({ opener
 			for i++; i < len(block) && depth > 0; i++ {
-				depth += strings.Count(block[i], "(") - strings.Count(block[i], ")")
+				depth += hcl.BraceDelta(block[i])
 			}
 			i-- // land on the last consumed line; the loop's i++ moves past it
 			out = append(out, indent+`definition = "`+esc+`"`)

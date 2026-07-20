@@ -131,7 +131,7 @@ func enrichRDSEngines(ctx context.Context, run *core.Run, inv *model.Inventory) 
 				Engine string `json:"Engine"`
 			} `json:"DBClusters"`
 		}
-		if err := runAws(ctx, &cl, "rds", "describe-db-clusters", "--region", reg); err == nil {
+		if tryAws(ctx, run, &cl, "rds", "describe-db-clusters", "--region", reg) {
 			for _, c := range cl.DBClusters {
 				engineByARN[strings.ToLower(c.Arn)] = c.Engine
 			}
@@ -142,7 +142,7 @@ func enrichRDSEngines(ctx context.Context, run *core.Run, inv *model.Inventory) 
 				Engine string `json:"Engine"`
 			} `json:"DBInstances"`
 		}
-		if err := runAws(ctx, &db, "rds", "describe-db-instances", "--region", reg); err == nil {
+		if tryAws(ctx, run, &db, "rds", "describe-db-instances", "--region", reg) {
 			for _, d := range db.DBInstances {
 				engineByARN[strings.ToLower(d.Arn)] = d.Engine
 			}

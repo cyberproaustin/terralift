@@ -51,6 +51,20 @@ func TestPaginatePropagatesError(t *testing.T) {
 	}
 }
 
+func TestPaginateStallsOnRepeatedToken(t *testing.T) {
+	calls := 0
+	_, err := Paginate(func(string) ([]int, string, error) {
+		calls++
+		if calls > 100 {
+			t.Fatal("Paginate did not stop on a repeated token (would loop forever)")
+		}
+		return []int{calls}, "stuck", nil // same non-empty token every page
+	})
+	if err == nil {
+		t.Fatal("want an error when the cursor never advances, got nil")
+	}
+}
+
 func TestTypeMap(t *testing.T) {
 	core := TypeMap{"ec2:instance": "aws_instance"}
 	full := TypeMap{"ec2:vpc": "aws_vpc", "ec2:instance": "aws_instance_OVERRIDE"}

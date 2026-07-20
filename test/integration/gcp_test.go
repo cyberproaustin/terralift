@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -29,17 +30,18 @@ func TestIntegrationGCP(t *testing.T) {
 	terraformSeed(t, "seeds/gcp", map[string]string{"project": project})
 
 	// Networking (network/subnetwork/firewall) exercises cross-reference rewiring;
-	// the bucket is a standalone global resource.
-	wantTypes := []string{
-		"google_compute_network",
-		"google_compute_subnetwork",
-		"google_compute_firewall",
-		"google_storage_bucket",
+	// the bucket is a standalone global resource. Each is keyed by its unique tl-it-*
+	// name so a pre-existing project resource of the same type cannot mask a miss.
+	wantSeed := map[string]string{
+		"google_compute_network":    `"tl-it-net"`,
+		"google_compute_subnetwork": `"tl-it-subnet"`,
+		"google_compute_firewall":   `"tl-it-fw"`,
+		"google_storage_bucket":     fmt.Sprintf(`"tl-it-%s"`, project),
 	}
 
 	deadline := time.Now().Add(15 * time.Minute)
-	rep, run := onboardUntil(t, "gcp", project, nil, deadline, wantTypes)
+	rep, run := onboardUntil(t, "gcp", project, nil, deadline, wantSeed)
 
 	rep.assertClean(t)
-	assertOnboarded(t, run, wantTypes...)
+	assertSeedOnboarded(t, run, wantSeed)
 }

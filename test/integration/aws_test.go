@@ -39,11 +39,13 @@ func TestIntegrationAWS(t *testing.T) {
 	// The seed exercises networking rewiring (VPC/subnet/SG), IAM roles, a Step
 	// Functions state machine and a CodeBuild project — the latter two also drive
 	// the cross-stack role data-source path (their role lives in the global stack).
-	wantTypes := []string{
-		"aws_vpc",
-		"aws_iam_role",
-		"aws_sfn_state_machine",
-		"aws_codebuild_project",
+	// Each is keyed by its unique tl-it-* name so a pre-existing account resource of
+	// the same type cannot mask a miss.
+	wantSeed := map[string]string{
+		"aws_vpc":               `"tl-it-vpc"`,
+		"aws_iam_role":          `"tl-it-sfn-role"`,
+		"aws_sfn_state_machine": `"tl-it-sm"`,
+		"aws_codebuild_project": `"tl-it-cb"`,
 	}
 
 	// Resource Explorer indexes new resources asynchronously and inconsistently, so
@@ -55,10 +57,10 @@ func TestIntegrationAWS(t *testing.T) {
 	}, 8*time.Minute)
 
 	deadline := time.Now().Add(15 * time.Minute)
-	rep, run := onboardUntil(t, "aws", account, nil, deadline, wantTypes)
+	rep, run := onboardUntil(t, "aws", account, nil, deadline, wantSeed)
 
 	// The account round-trips with no drift and no failed stacks...
 	rep.assertClean(t)
-	// ...and every seed type was mapped (not dropped to a gap).
-	assertOnboarded(t, run, wantTypes...)
+	// ...and every seed resource was mapped (not dropped to a gap).
+	assertSeedOnboarded(t, run, wantSeed)
 }

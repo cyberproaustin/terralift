@@ -42,6 +42,29 @@ resource "aws_vpc" "v" {
 	}
 }
 
+func TestWalkResourceBlocksSingleLineNotSwallowed(t *testing.T) {
+	// An empty single-line block (delta 0 on its header) must NOT extend into and
+	// swallow the block that follows it.
+	src := `resource "aws_vpc" "v" {}
+resource "aws_kms_key" "k" {
+  policy = "x"
+}`
+	var visited [][]string
+	_, _ = WalkResourceBlocks(strings.Split(src, "\n"), func(typ string, block []string) ([]string, []Redaction) {
+		visited = append(visited, block)
+		return block, nil
+	})
+	if len(visited) != 2 {
+		t.Fatalf("expected 2 independently-walked blocks, got %d: %v", len(visited), visited)
+	}
+	if len(visited[0]) != 1 || !strings.Contains(visited[0][0], "aws_vpc") {
+		t.Errorf("first block should be the single-line vpc only, got %v", visited[0])
+	}
+	if !strings.Contains(strings.Join(visited[1], "\n"), "aws_kms_key") {
+		t.Errorf("second block should be the kms key, got %v", visited[1])
+	}
+}
+
 func TestWalkResourceBlocksNestedBraces(t *testing.T) {
 	// A block containing nested braces must be delimited correctly.
 	src := `resource "aws_ecs_service" "s" {

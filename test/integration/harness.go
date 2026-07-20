@@ -119,49 +119,77 @@ func repoHCL(run string) string {
 	return all.String()
 }
 
-// repoHasAll reports whether every tfType has a resource block in the generated repo.
-func repoHasAll(run string, tfTypes ...string) bool {
+// seedBlockPresent reports whether some `resource "tfType" "..." { ... }` block in
+// the generated HCL carries marker in its body. Tying the unique seed marker (a
+// tl-it-* name) to a resource of the expected type is what proves the SEED's own
+// resource was onboarded — a bare type check would pass on a pre-existing resource
+// of the same type in an account/project-wide scan (e.g. any account already has
+// aws_iam_role), and would not catch a misclassification to the wrong type.
+func seedBlockPresent(hcl, tfType, marker string) bool {
+	header := `resource "` + tfType + `"`
+	for i := 0; ; {
+		h := strings.Index(hcl[i:], header)
+		if h < 0 {
+			return false
+		}
+		start := i + h
+		rest := hcl[start+len(header):]
+		body := rest
+		if n := strings.Index(rest, "\nresource \""); n >= 0 {
+			body = rest[:n] // block ends at the next top-level resource header
+		}
+		if strings.Contains(body, marker) {
+			return true
+		}
+		i = start + len(header)
+	}
+}
+
+// repoHasSeed reports whether, for every (tfType -> unique marker) pair, the
+// generated repo has a resource of that type whose block contains the marker.
+func repoHasSeed(run string, want map[string]string) bool {
 	s := repoHCL(run)
-	for _, tf := range tfTypes {
-		if !strings.Contains(s, `resource "`+tf+`"`) {
+	for tf, marker := range want {
+		if !seedBlockPresent(s, tf, marker) {
 			return false
 		}
 	}
 	return true
 }
 
-// assertOnboarded fails unless a resource of each tfType appears in the generated
-// repo (proving the seed type was mapped, not dropped to a gap).
-func assertOnboarded(t *testing.T, run string, tfTypes ...string) {
+// assertSeedOnboarded fails unless every (tfType -> unique marker) pair is present
+// in the generated repo (proving the seed's own resource was mapped, not dropped to
+// a gap and not confused with pre-existing account noise of the same type).
+func assertSeedOnboarded(t *testing.T, run string, want map[string]string) {
 	t.Helper()
 	s := repoHCL(run)
-	for _, tf := range tfTypes {
-		if !strings.Contains(s, `resource "`+tf+`"`) {
-			t.Errorf("expected %s to be onboarded, but no such resource is in the generated repo", tf)
+	for tf, marker := range want {
+		if !seedBlockPresent(s, tf, marker) {
+			t.Errorf("expected seed resource %s named %q to be onboarded, but no such block is in the generated repo", tf, marker)
 		}
 	}
 }
 
-// onboardUntil re-runs onboard (with the given extra flags) until every wantType
-// appears in the generated repo or the deadline passes, then returns the last
-// report and run dir. Retries absorb the eventual-consistency lag every cloud's
-// enumeration source has on freshly-created resources (AWS Resource Explorer, GCP
-// Cloud Asset Inventory, Azure Resource Graph) — a single sweep can miss a resource
-// that a later sweep indexes. The scope invariant (assertClean) is unaffected by the
-// lag and is checked by the caller on whatever run is returned.
-func onboardUntil(t *testing.T, cloud, scope string, extra []string, deadline time.Time, wantTypes []string) (correctnessReport, string) {
+// onboardUntil re-runs onboard (with the given extra flags) until every seed
+// resource in want appears in the generated repo or the deadline passes, then
+// returns the last report and run dir. Retries absorb the eventual-consistency lag
+// every cloud's enumeration source has on freshly-created resources (AWS Resource
+// Explorer, GCP Cloud Asset Inventory, Azure Resource Graph) — a single sweep can
+// miss a resource that a later sweep indexes. The scope invariant (assertClean) is
+// unaffected by the lag and is checked by the caller on whatever run is returned.
+func onboardUntil(t *testing.T, cloud, scope string, extra []string, deadline time.Time, want map[string]string) (correctnessReport, string) {
 	t.Helper()
 	for attempt := 1; ; attempt++ {
 		rep, run := onboard(t, cloud, scope, extra...)
-		if repoHasAll(run, wantTypes...) {
-			t.Logf("all seed types present after %d onboard attempt(s)", attempt)
+		if repoHasSeed(run, want) {
+			t.Logf("all seed resources present after %d onboard attempt(s)", attempt)
 			return rep, run
 		}
 		if time.Now().After(deadline) {
-			t.Logf("deadline reached after %d attempt(s); some of %v never indexed", attempt, wantTypes)
+			t.Logf("deadline reached after %d attempt(s); some seed resources never indexed", attempt)
 			return rep, run
 		}
-		t.Logf("attempt %d: not all of %v indexed yet; retrying onboard in 30s", attempt, wantTypes)
+		t.Logf("attempt %d: not all seed resources indexed yet; retrying onboard in 30s", attempt)
 		time.Sleep(30 * time.Second)
 	}
 }
@@ -178,7 +206,10 @@ func terraformSeed(t *testing.T, seedDir string, vars map[string]string) {
 	}
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".tf") {
-			b, _ := os.ReadFile(filepath.Join(seedDir, e.Name()))
+			b, err := os.ReadFile(filepath.Join(seedDir, e.Name()))
+			if err != nil {
+				t.Fatalf("read seed file %s: %v", e.Name(), err)
+			}
 			if err := os.WriteFile(filepath.Join(tmp, e.Name()), b, 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -197,14 +228,18 @@ func terraformSeed(t *testing.T, seedDir string, vars map[string]string) {
 	if out, err := tf("init", "-no-color"); err != nil {
 		t.Fatalf("terraform init: %v\n%s", err, out)
 	}
-	if out, err := tf(append([]string{"apply", "-auto-approve", "-no-color"}, varArgs...)...); err != nil {
-		t.Fatalf("terraform apply: %v\n%s", err, out)
-	}
+	// Register teardown BEFORE apply: a partial apply that creates some resources
+	// then errors would otherwise leak them, since a cleanup registered after apply
+	// never runs. `terraform destroy` against the partial state tears down whatever
+	// was created, and t.Cleanup (LIFO) runs it before the t.TempDir state is removed.
 	t.Cleanup(func() {
 		if out, err := tf(append([]string{"destroy", "-auto-approve", "-no-color"}, varArgs...)...); err != nil {
 			t.Errorf("terraform destroy (manual cleanup may be needed): %v\n%s", err, out)
 		}
 	})
+	if out, err := tf(append([]string{"apply", "-auto-approve", "-no-color"}, varArgs...)...); err != nil {
+		t.Fatalf("terraform apply: %v\n%s", err, out)
+	}
 }
 
 // waitForSeedIndexed polls Resource Explorer with the SAME broad query terralift's

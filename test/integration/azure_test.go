@@ -41,16 +41,19 @@ func TestIntegrationAzure(t *testing.T) {
 		"location":        location,
 	})
 
-	wantTypes := []string{
-		"azurerm_virtual_network",
-		"azurerm_network_security_group",
-		"azurerm_public_ip",
-		"azurerm_storage_account",
+	// Keyed by each resource's unique tl-it-* name. (Azure onboarding is already
+	// scoped to just this RG, but the marker check keeps the three clouds uniform
+	// and still guards against a type being dropped to a gap.)
+	wantSeed := map[string]string{
+		"azurerm_virtual_network":        `"tl-it-vnet"`,
+		"azurerm_network_security_group": `"tl-it-nsg"`,
+		"azurerm_public_ip":              `"tl-it-pip"`,
+		"azurerm_storage_account":        fmt.Sprintf(`"%s"`, sa),
 	}
 
 	deadline := time.Now().Add(15 * time.Minute)
-	rep, run := onboardUntil(t, "azure", sub, []string{"--resource-groups", rg}, deadline, wantTypes)
+	rep, run := onboardUntil(t, "azure", sub, []string{"--resource-groups", rg}, deadline, wantSeed)
 
 	rep.assertClean(t)
-	assertOnboarded(t, run, wantTypes...)
+	assertSeedOnboarded(t, run, wantSeed)
 }

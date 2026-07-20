@@ -52,3 +52,45 @@ resource "aws_codebuild_project" "cb" {
 		t.Errorf("a role that is not onboarded must stay a literal ARN:\n%s", s)
 	}
 }
+
+func TestRewireCrossStackRoleLabelCollision(t *testing.T) {
+	// Two DISTINCT role names that sanitize to the same label ("App-Role" and
+	// "app_role" both -> "app_role") must each get their own data source; otherwise
+	// one reference would silently resolve to the wrong role's ARN.
+	dir := t.TempDir()
+	gen := filepath.Join(dir, "generated.tf")
+	src := `resource "aws_sfn_state_machine" "a" {
+  role_arn = "arn:aws:iam::123:role/App-Role"
+}
+resource "aws_lambda_function" "b" {
+  role_arn = "arn:aws:iam::123:role/app_role"
+}`
+	if err := os.WriteFile(gen, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	roles := map[string]string{
+		"arn:aws:iam::123:role/app-role": "App-Role", // crossStackRoles keys are lowercased ARNs
+		"arn:aws:iam::123:role/app_role": "app_role",
+	}
+	if n := rewireCrossStackRoleRefs(gen, roles); n != 2 {
+		t.Fatalf("rewired %d, want 2", n)
+	}
+	s := string(mustRead(t, gen))
+	// The two references must point at DIFFERENT data sources...
+	if !strings.Contains(s, "data.aws_iam_role.app_role.arn") || !strings.Contains(s, "data.aws_iam_role.app_role_2.arn") {
+		t.Errorf("collision not disambiguated (both refs share one label):\n%s", s)
+	}
+	// ...and each emitted data source must carry its own distinct role name.
+	if !strings.Contains(s, "\"App-Role\"") || !strings.Contains(s, "\"app_role\"") {
+		t.Errorf("a distinct data source per role name was not emitted:\n%s", s)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

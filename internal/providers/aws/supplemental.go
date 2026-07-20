@@ -18,6 +18,22 @@ func enumSupplemental(ctx context.Context, run *core.Run, inv *model.Inventory) 
 	enumIdentityStore(ctx, run, inv)
 }
 
+// tryAws runs a best-effort secondary describe/list, returning true on success. On
+// failure it logs at Verbose and returns false, so a throttled or permission-denied
+// call leaves a trace instead of silently under-enumerating while the phase still
+// reports a success count.
+func tryAws(ctx context.Context, run *core.Run, v any, args ...string) bool {
+	if err := runAws(ctx, v, args...); err != nil {
+		op := args
+		if len(op) > 2 {
+			op = op[:2]
+		}
+		run.Log.Verbose("Enumerate", "supplemental %q skipped: %v", strings.Join(op, " "), err)
+		return false
+	}
+	return true
+}
+
 // enumIdentityStore injects IAM Identity Center identity-store resources, which
 // Resource Explorer does not index: users, groups, and group memberships. No-op if
 // Identity Center is not enabled. Each imports by the COMPOSITE id
@@ -51,7 +67,7 @@ func enumIdentityStore(ctx context.Context, run *core.Run, inv *model.Inventory)
 			UserName string `json:"UserName"`
 		} `json:"Users"`
 	}
-	if runAws(ctx, &users, "identitystore", "list-users", "--identity-store-id", store) == nil {
+	if tryAws(ctx, run, &users, "identitystore", "list-users", "--identity-store-id", store) {
 		for _, u := range users.Users {
 			add(u.UserId, u.UserName, "aws_identitystore_user", "user")
 			added++
@@ -64,7 +80,7 @@ func enumIdentityStore(ctx context.Context, run *core.Run, inv *model.Inventory)
 			DisplayName string `json:"DisplayName"`
 		} `json:"Groups"`
 	}
-	if runAws(ctx, &groups, "identitystore", "list-groups", "--identity-store-id", store) == nil {
+	if tryAws(ctx, run, &groups, "identitystore", "list-groups", "--identity-store-id", store) {
 		for _, g := range groups.Groups {
 			add(g.GroupId, g.DisplayName, "aws_identitystore_group", "group")
 			added++
@@ -73,7 +89,7 @@ func enumIdentityStore(ctx context.Context, run *core.Run, inv *model.Inventory)
 					MembershipId string `json:"MembershipId"`
 				} `json:"GroupMemberships"`
 			}
-			if runAws(ctx, &mems, "identitystore", "list-group-memberships", "--identity-store-id", store, "--group-id", g.GroupId) == nil {
+			if tryAws(ctx, run, &mems, "identitystore", "list-group-memberships", "--identity-store-id", store, "--group-id", g.GroupId) {
 				for _, m := range mems.GroupMemberships {
 					add(m.MembershipId, g.DisplayName+"-membership", "aws_identitystore_group_membership", "group-membership")
 					added++
@@ -116,9 +132,9 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 			Id string `json:"Id"`
 		} `json:"Roots"`
 	}
-	if runAws(ctx, &roots, "organizations", "list-roots") == nil {
+	if tryAws(ctx, run, &roots, "organizations", "list-roots") {
 		for _, root := range roots.Roots {
-			added += enumOrgOUs(ctx, inv, root.Id, add)
+			added += enumOrgOUs(ctx, run, inv, root.Id, add)
 		}
 	}
 
@@ -130,7 +146,7 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 				AwsManaged bool   `json:"AwsManaged"`
 			} `json:"Policies"`
 		}
-		if runAws(ctx, &pols, "organizations", "list-policies", "--filter", ptype) == nil {
+		if tryAws(ctx, run, &pols, "organizations", "list-policies", "--filter", ptype) {
 			for _, p := range pols.Policies {
 				if p.AwsManaged {
 					continue // AWS-managed (e.g. FullAWSAccess) is not onboardable
@@ -144,7 +160,7 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 						TargetId string `json:"TargetId"`
 					} `json:"Targets"`
 				}
-				if runAws(ctx, &targets, "organizations", "list-targets-for-policy", "--policy-id", p.Id) == nil {
+				if tryAws(ctx, run, &targets, "organizations", "list-targets-for-policy", "--policy-id", p.Id) {
 					for _, tg := range targets.Targets {
 						add(tg.TargetId+":"+p.Id, p.Name+"-"+tg.TargetId, "aws_organizations_policy_attachment", "policy-attachment")
 						added++
@@ -160,7 +176,7 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 			Name string `json:"Name"`
 		} `json:"Accounts"`
 	}
-	if runAws(ctx, &accts, "organizations", "list-accounts") == nil {
+	if tryAws(ctx, run, &accts, "organizations", "list-accounts") {
 		for _, a := range accts.Accounts {
 			if a.Id == org.Organization.MasterAccountId {
 				continue // the management account is not a manageable member resource
@@ -173,21 +189,21 @@ func enumOrganizations(ctx context.Context, run *core.Run, inv *model.Inventory)
 }
 
 // enumOrgOUs recursively injects the OUs under parentID and returns the count added.
-func enumOrgOUs(ctx context.Context, inv *model.Inventory, parentID string, add func(id, name, tfType, nativeSuffix string)) int {
+func enumOrgOUs(ctx context.Context, run *core.Run, inv *model.Inventory, parentID string, add func(id, name, tfType, nativeSuffix string)) int {
 	var ous struct {
 		OrganizationalUnits []struct {
 			Id   string `json:"Id"`
 			Name string `json:"Name"`
 		} `json:"OrganizationalUnits"`
 	}
-	if err := runAws(ctx, &ous, "organizations", "list-organizational-units-for-parent", "--parent-id", parentID); err != nil {
+	if !tryAws(ctx, run, &ous, "organizations", "list-organizational-units-for-parent", "--parent-id", parentID) {
 		return 0
 	}
 	n := 0
 	for _, ou := range ous.OrganizationalUnits {
 		add(ou.Id, ou.Name, "aws_organizations_organizational_unit", "ou")
 		n++
-		n += enumOrgOUs(ctx, inv, ou.Id, add)
+		n += enumOrgOUs(ctx, run, inv, ou.Id, add)
 	}
 	return n
 }
