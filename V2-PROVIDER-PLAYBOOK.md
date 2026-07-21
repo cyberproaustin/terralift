@@ -145,7 +145,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 
 | # | Provider | Status | Notes |
 |---|----------|--------|-------|
-| 1 | Cloudflare | research | account scope; zones + DNS records beachhead, then rulesets/page rules/LB/access |
+| 1 | Cloudflare | pushed | 16 config resources; spec at docs/v2-specs/cloudflare.md; reviewed (2 MED + LOWs remediated); curation is Phase B |
 | 2 | DigitalOcean | todo | |
 | 3 | Fastly | todo | |
 | 4 | NS1 | todo | |
@@ -210,8 +210,9 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 
 ## Current status / session handoff
 
-- **Done & pushed:** GitHub provider (`feat/github-provider`, 8 commits, reviewed +
-  remediated, plan-clean on both user and org scope).
-- **In progress:** Cloudflare (#1) — research phase. Next: build the scaffold
-  (zones + DNS records beachhead), review, push to `feat/v2-breadth`.
-- **Next up after Cloudflare:** DigitalOcean (#2).
+- **Done & pushed:** GitHub provider (`feat/github-provider`, reviewed, plan-clean on
+  user + org scope). Cloudflare scaffold (#1) on `feat/v2-breadth` — 16 config
+  resources, reviewed (2 MEDIUM + LOWs remediated), spec at docs/v2-specs/cloudflare.md.
+  Phase-B (curation → plan-clean) pending live creds.
+- **Next up:** DigitalOcean (#2) — same loop: research (Terraformer + doctl/API +
+  provider import docs) → build → review → push.
