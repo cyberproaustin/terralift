@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	// Blank imports register each cloud provider via its init().
+	_ "github.com/cyberproaustin/terralift/internal/providers/auth0"
 	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
 	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/cloudflare"
