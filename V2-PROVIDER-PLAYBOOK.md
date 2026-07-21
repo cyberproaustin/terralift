@@ -162,7 +162,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 | 10 | Honeycomb | pushed | 14 config resources (dataset/column/derived_column/query_annotation/flexible_board/trigger/slo/burn_alert + 6 typed recipients); spec at docs/v2-specs/honeycomb.md (commit e626c51). Fastly-style per-dataset FAN-OUT (/1/datasets → per-dataset sub-lists) + second-level per-SLO burn-alert fan-out + synthetic __all__ pass; X-Honeycomb-Team auth, US/EU base (https-forced), bare JSON arrays no pagination. Composite import IDs: <dataset>/<token> dataset-scoped, BARE for team-wide AND for __all__ env-wide variants (the subtle fork); column by key_name, derived_column by alias. Recipient type-split; classic-board skip. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED https-enforce + LOW (minor-pin, PathEscape ds, 401 early-out) remediated. query/dataset_definition/marker/board_view/v2-mgmt deferred; api_key + recipient secrets excluded/scrubbed |
 | 11 | PagerDuty | pushed | 18 config resources (service+integration/escalation_policy/schedule/team+membership/user+contact_method+notification_rule/business_service/maintenance_window/extension+servicenow/webhook_subscription/tag/response_play/ruleset+rule); spec at docs/v2-specs/pagerduty.md (commit 3ed91fc). Distinctive `Authorization: Token token=` header + vnd.pagerduty+json;version=2; US/EU region (https-forced); keyed offset/limit/`more` pager; From-header gating for response_plays. Import IDs: DOT (service_integration/ruleset_rule, parent-first) vs COLON (team_membership/user_contact_method/user_notification_rule, USER-first) vs bare. 5 fan-outs (service→integrations via include, team→members, user→contact/notif, ruleset→rules); extension-schema discriminator. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; LOW fixes (PathEscape fan-out ids, mw filter future+ongoing, drop email from label, 401 short-circuit) remediated. Event Orchestration/automation_actions/slack_connection deferred; integration_key/webhook/extension secrets Phase-B scrub |
 | 12 | Opsgenie | pushed | 16 config resources (team+routing_rule/user+contact+notification_rule/schedule+rotation/escalation/service+incident_rule/api+email integration/alert+notification policy/maintenance/heartbeat); spec at docs/v2-specs/opsgenie.md (commit a7c52f3). `Authorization: GenieKey` header; US/EU region (https-forced); data/paging.next SERVER-URL cursor — HOST-VALIDATED before re-sending the key (isOpsgenieURL, the Fastly next-link lesson). All SLASH composites; per-user fan-outs use DIFFERENT parents (user_contact by USERNAME, notification_rule by user_id); alert_policy flips bare(global)/team-slash; heartbeat by-name from nested data.heartbeats. Integration type-discriminator (API/Email only). Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED /v2/account→/v2/users fallback + LOW global-policy overwrite guard remediated. integration_action/custom_role (no import) + vendor integrations deferred; api_key Phase-B scrub. NOTE: 2nd review pair (session-limit re-run) |
-| 13 | Okta | todo | |
+| 13 | Okta | pushed | ~29 config-core TF types (user/group/group_rule/user_type + 8 signOnMode app types + trusted_origin/network_zone + auth_server+scope/claim/policy/policy_rule + signon/password/mfa policies+rules + inline/event hooks + oidc/saml idps); spec at docs/v2-specs/okta.md (commit fac4d16). Big provider (100+ resources) — scoped to config core, long tail deferred. FIRST Link-header (RFC5988) pagination — next-URL in the `Link` header, host-validated before re-sending the SSWS token (probed vs 12 bypass forms); `SSWS` auth; CONSTRUCTED base (OKTA_ORG_NAME+OKTA_BASE_URL). Discriminators: apps by signOnMode (+BROWSER_PLUGIN name split, skip Okta-own), policies by required ?type=, idps by type. Composite DEPTH: bare / 2-part / 3-part (auth_server_policy_rule). Bounded 429 retry (Retry-After) added. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED 429-backoff + LOW bracket-aware-Link-parse remediated. schema/brand/factors/assignments/social-idp deferred; app/idp/hook secrets Phase-B scrub |
 | 14 | Auth0 | todo | |
 | 15 | LaunchDarkly | todo | |
 | 16 | Keycloak | todo | |
@@ -233,8 +233,18 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
   headers on a cross-host 3xx. Datadog now uses a redirect-refusing client; the other
   six (cloudflare/digitalocean/fastly/linode/ns1/vultr) should get the same hardening
   in a Phase-B sweep (their auth headers are single, lower blast radius, but same class).
+- **Cross-cutting Phase-B gate (from every review):** all scaffolds run
+  `generate-config-out` and write `generated.tf` with the provider's read-back secrets
+  UN-scrubbed (`scrubGeneratedHCL` is a no-op until Phase B). This is the documented
+  two-phase posture (a Phase-A export is NOT plan-clean and must not be applied to
+  production), backstopped by the pipeline's repo-wide secret scan. Phase-B: gate
+  `GenerateConfig` behind the per-provider scrub (or a `--allow-unscrubbed` flag) before
+  any live production export. Tracked once here, not per-provider.
+- **429 backoff:** New Relic + Okta now do bounded `Retry-After` backoff (large/
+  aggressively-rate-limited lists). The other REST providers treat 429 as a transient
+  Warn (house pattern); revisit per-provider in Phase B if live runs brush the limit.
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 2 — Okta (#13), then Auth0, LaunchDarkly, Keycloak, Logz.io,
-  Mackerel, Vault.
+- **Next up:** Batch 2 — Auth0 (#14), then LaunchDarkly, Keycloak, Logz.io, Mackerel,
+  Vault.
