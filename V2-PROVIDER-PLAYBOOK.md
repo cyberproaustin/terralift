@@ -156,7 +156,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 
 | # | Provider | Status | Notes |
 |---|----------|--------|-------|
-| 7 | Datadog | todo | |
+| 7 | Datadog | pushed | 13 config resources (monitors/dashboards/dashboard_lists/SLOs/synthetics/logs index+pipeline+metric/notebooks/security rules/downtimes/roles/users); spec at docs/v2-specs/datadog.md (commit 677066a). TWO auth headers (DD-API-KEY + DD-APPLICATION-KEY); site-configurable base (DD_HOST, forced https); THREE response families (v1 bare / v1 keyed / v2 JSON:API) + FOUR pagers; flex ddID (numeric notebook ids); flat-object attr fallback (security rules); redirect-refusing client. Reviewed (2 agents): HIGH notebook-id decode + MED flat isDefault + MED redirect-leak + LOW http-scheme all remediated. Integration plane + api/app keys excluded by non-enumeration |
 | 8 | New Relic | todo | |
 | 9 | Grafana | todo | |
 | 10 | Honeycomb | todo | |
@@ -213,10 +213,16 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 - **Done & pushed:** GitHub (`feat/github-provider`, reviewed, plan-clean). BATCH 1
   complete on `feat/v2-breadth`: Cloudflare (#1, 16), DigitalOcean (#2, 22),
   Fastly (#3, 11), NS1 (#4, 10), Linode (#5, 18), Vultr (#6, 16) — reviewed
-  scaffolds; specs at docs/v2-specs/. Phase-B (curation → plan-clean) pending live
-  creds per provider.
+  scaffolds; specs at docs/v2-specs/. BATCH 2 in progress: Datadog (#7, 13) —
+  reviewed scaffold pushed. Phase-B (curation → plan-clean) pending live creds per
+  provider.
+- **Cross-provider note (from Datadog security review):** all HTTP providers use
+  `http.DefaultClient`, which auto-follows redirects and does NOT strip custom auth
+  headers on a cross-host 3xx. Datadog now uses a redirect-refusing client; the other
+  six (cloudflare/digitalocean/fastly/linode/ns1/vultr) should get the same hardening
+  in a Phase-B sweep (their auth headers are single, lower blast radius, but same class).
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 2 — Datadog (#7), then New Relic, Grafana, Honeycomb,
-  PagerDuty, Opsgenie, Okta, Auth0, LaunchDarkly, Keycloak, Logz.io, Mackerel, Vault.
+- **Next up:** Batch 2 — New Relic (#8), then Grafana, Honeycomb, PagerDuty,
+  Opsgenie, Okta, Auth0, LaunchDarkly, Keycloak, Logz.io, Mackerel, Vault.
