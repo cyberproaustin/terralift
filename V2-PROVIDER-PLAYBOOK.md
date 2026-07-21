@@ -147,7 +147,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 |---|----------|--------|-------|
 | 1 | Cloudflare | pushed | 16 config resources; spec at docs/v2-specs/cloudflare.md; reviewed (2 MED + LOWs remediated); curation is Phase B |
 | 2 | DigitalOcean | pushed | 22 resources; spec at docs/v2-specs/digitalocean.md; per-endpoint nesting key + links.pages.next paging; reviewed + remediated (next-url host check, DB-default gating, systemic-failure guard) |
-| 3 | Fastly | todo | |
+| 3 | Fastly | pushed | 11 standalone resources (service-centric: config nests in fastly_service_vcl); spec at docs/v2-specs/fastly.md; two response families (bare arrays + JSON:API); reviewed + remediated (401-fatal, decode-error wrap) |
 | 4 | NS1 | todo | |
 | 5 | Linode | todo | |
 | 6 | Vultr | todo | |
@@ -211,7 +211,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 ## Current status / session handoff
 
 - **Done & pushed:** GitHub (`feat/github-provider`, reviewed, plan-clean). On
-  `feat/v2-breadth`: Cloudflare (#1, 16 resources) and DigitalOcean (#2, 22 resources)
-  — both reviewed + remediated scaffolds; specs at docs/v2-specs/. Phase-B (curation →
+  `feat/v2-breadth`: Cloudflare (#1, 16), DigitalOcean (#2, 22), Fastly (#3, 11) —
+  reviewed + remediated scaffolds; specs at docs/v2-specs/. Phase-B (curation →
   plan-clean) pending live creds per provider.
-- **Next up:** Fastly (#3) — same loop. Then NS1, Linode, Vultr (rest of Batch 1).
+- **Next up:** NS1 (#4) — same loop. Then Linode, Vultr (rest of Batch 1).

@@ -16,6 +16,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
 	_ "github.com/cyberproaustin/terralift/internal/providers/cloudflare"
 	_ "github.com/cyberproaustin/terralift/internal/providers/digitalocean"
+	_ "github.com/cyberproaustin/terralift/internal/providers/fastly"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 	_ "github.com/cyberproaustin/terralift/internal/providers/github"
 )
