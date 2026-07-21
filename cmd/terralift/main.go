@@ -26,6 +26,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/keycloak"
 	_ "github.com/cyberproaustin/terralift/internal/providers/launchdarkly"
 	_ "github.com/cyberproaustin/terralift/internal/providers/linode"
+	_ "github.com/cyberproaustin/terralift/internal/providers/logzio"
 	_ "github.com/cyberproaustin/terralift/internal/providers/newrelic"
 	_ "github.com/cyberproaustin/terralift/internal/providers/ns1"
 	_ "github.com/cyberproaustin/terralift/internal/providers/okta"
