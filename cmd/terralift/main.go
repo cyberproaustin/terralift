@@ -23,6 +23,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/github"
 	_ "github.com/cyberproaustin/terralift/internal/providers/grafana"
 	_ "github.com/cyberproaustin/terralift/internal/providers/honeycomb"
+	_ "github.com/cyberproaustin/terralift/internal/providers/launchdarkly"
 	_ "github.com/cyberproaustin/terralift/internal/providers/linode"
 	_ "github.com/cyberproaustin/terralift/internal/providers/newrelic"
 	_ "github.com/cyberproaustin/terralift/internal/providers/ns1"
