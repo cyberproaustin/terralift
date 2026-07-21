@@ -160,7 +160,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 | 8 | New Relic | pushed | 16 config resources (one_dashboard/alert_policy/nrql_alert_condition/muting_rule/notification destination+channel/workflow/5 synthetics monitor types/workload/key_transaction/obfuscation rule+expression); spec at docs/v2-specs/newrelic.md (commit 1ab96ce). FIRST GraphQL provider — NerdGraph single-endpoint POST client, nextCursor pagination, 200-with-errors=failure, bounded 429/5xx backoff. Import-ID composites verified: alert_policy `<policy_id>:<account_id>` (account SECOND, reversed!), nrql_condition `<policy>:<cond>:<static|baseline>`, workload/muting_rule account-FIRST. Synthetics 6-way monitorType split; dashboard parent filter; workload workloadId per-entity follow-up; nrID flex string/number decode. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED 429-backoff + LOW entityFilter-guard remediated. service_level/private_location/entity_tags/drop_rule deferred; api_access_key/secure_credential-value excluded |
 | 9 | Grafana | pushed | 14 config resources (dashboard/folder/data_source/unified-alerting provisioning: contact_point+notification_policy(singleton)+message_template+mute_timing+rule_group/team/service_account/playlist/library_panel/role+report(Enterprise best-effort)); spec at docs/v2-specs/grafana.md (commit ce977d7). FIRST user-supplied host (GRAFANA_URL, validated); dual Bearer/Basic auth (GRAFANA_AUTH); X-Grafana-Org-Id; 4 response families + 3 pagers (perPage vs perpage casing). Org-scoped COMPOSITE import IDs built at export from Container: orgID:token / orgID:name / 3-part orgID:folderUID:title (rule_group) / orgID:policy (singleton). Contact-point name-dedup; rule-group synthesis by (folderUID,ruleGroup); General-folder + fixed-role skips. Reviewed (2 agents): both APPROVE, no CRIT/HIGH/MED; LOW fixes (auth TrimSpace, http+Basic warn, org guard-case) remediated. permissions/annotation/organization deferred; SA-token/datasource-secure-fields/Cloud-stack excluded |
 | 10 | Honeycomb | pushed | 14 config resources (dataset/column/derived_column/query_annotation/flexible_board/trigger/slo/burn_alert + 6 typed recipients); spec at docs/v2-specs/honeycomb.md (commit e626c51). Fastly-style per-dataset FAN-OUT (/1/datasets → per-dataset sub-lists) + second-level per-SLO burn-alert fan-out + synthetic __all__ pass; X-Honeycomb-Team auth, US/EU base (https-forced), bare JSON arrays no pagination. Composite import IDs: <dataset>/<token> dataset-scoped, BARE for team-wide AND for __all__ env-wide variants (the subtle fork); column by key_name, derived_column by alias. Recipient type-split; classic-board skip. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED https-enforce + LOW (minor-pin, PathEscape ds, 401 early-out) remediated. query/dataset_definition/marker/board_view/v2-mgmt deferred; api_key + recipient secrets excluded/scrubbed |
-| 11 | PagerDuty | todo | |
+| 11 | PagerDuty | pushed | 18 config resources (service+integration/escalation_policy/schedule/team+membership/user+contact_method+notification_rule/business_service/maintenance_window/extension+servicenow/webhook_subscription/tag/response_play/ruleset+rule); spec at docs/v2-specs/pagerduty.md (commit 3ed91fc). Distinctive `Authorization: Token token=` header + vnd.pagerduty+json;version=2; US/EU region (https-forced); keyed offset/limit/`more` pager; From-header gating for response_plays. Import IDs: DOT (service_integration/ruleset_rule, parent-first) vs COLON (team_membership/user_contact_method/user_notification_rule, USER-first) vs bare. 5 fan-outs (service→integrations via include, team→members, user→contact/notif, ruleset→rules); extension-schema discriminator. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; LOW fixes (PathEscape fan-out ids, mw filter future+ongoing, drop email from label, 401 short-circuit) remediated. Event Orchestration/automation_actions/slack_connection deferred; integration_key/webhook/extension secrets Phase-B scrub |
 | 12 | Opsgenie | todo | |
 | 13 | Okta | todo | |
 | 14 | Auth0 | todo | |
@@ -214,11 +214,19 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
   complete on `feat/v2-breadth`: Cloudflare (#1, 16), DigitalOcean (#2, 22),
   Fastly (#3, 11), NS1 (#4, 10), Linode (#5, 18), Vultr (#6, 16) — reviewed
   scaffolds; specs at docs/v2-specs/. BATCH 2 in progress: Datadog (#7, 13),
-  New Relic (#8, 16), Grafana (#9, 14), Honeycomb (#10, 14) — reviewed scaffolds
-  pushed. New Relic is the first GraphQL (NerdGraph) provider; Grafana is the first
-  user-supplied-host provider (GRAFANA_URL); Honeycomb is a Fastly-style per-dataset
-  fan-out — all reusable shapes for later providers. Phase-B (curation → plan-clean)
-  pending live creds per provider.
+  New Relic (#8, 16), Grafana (#9, 14), Honeycomb (#10, 14), PagerDuty (#11, 18) —
+  reviewed scaffolds pushed. New Relic is the first GraphQL (NerdGraph) provider;
+  Grafana is the first user-supplied-host provider (GRAFANA_URL); Honeycomb is a
+  Fastly-style per-dataset fan-out; PagerDuty adds the `Token token=` auth + mixed
+  dot/colon composites — all reusable shapes for later providers. Phase-B (curation →
+  plan-clean) pending live creds per provider.
+- **Deferred house-pattern cleanup (from PagerDuty review):** the shared `list()`
+  error helper (copied across all providers from Fastly) lets a fatal 401 fall through
+  to `hardFails++`+Warn before the `fatal` short-circuit. Harmless (fatal wins before
+  the guard is read) but noisy. PagerDuty's `list()`/`subList()` now `return` after
+  setting fatal + early-out when fatal is set; retrofit the earlier providers
+  (cloudflare/DO/fastly/ns1/linode/vultr/datadog/newrelic/grafana/honeycomb) in a
+  Phase-B sweep.
 - **Cross-provider note (from Datadog security review):** all HTTP providers use
   `http.DefaultClient`, which auto-follows redirects and does NOT strip custom auth
   headers on a cross-host 3xx. Datadog now uses a redirect-refusing client; the other
@@ -227,5 +235,5 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 2 — PagerDuty (#11), then Opsgenie, Okta, Auth0, LaunchDarkly,
-  Keycloak, Logz.io, Mackerel, Vault.
+- **Next up:** Batch 2 — Opsgenie (#12), then Okta, Auth0, LaunchDarkly, Keycloak,
+  Logz.io, Mackerel, Vault.
