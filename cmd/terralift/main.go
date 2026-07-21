@@ -25,6 +25,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/linode"
 	_ "github.com/cyberproaustin/terralift/internal/providers/newrelic"
 	_ "github.com/cyberproaustin/terralift/internal/providers/ns1"
+	_ "github.com/cyberproaustin/terralift/internal/providers/opsgenie"
 	_ "github.com/cyberproaustin/terralift/internal/providers/pagerduty"
 	_ "github.com/cyberproaustin/terralift/internal/providers/vultr"
 )

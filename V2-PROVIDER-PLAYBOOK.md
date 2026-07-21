@@ -161,7 +161,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 | 9 | Grafana | pushed | 14 config resources (dashboard/folder/data_source/unified-alerting provisioning: contact_point+notification_policy(singleton)+message_template+mute_timing+rule_group/team/service_account/playlist/library_panel/role+report(Enterprise best-effort)); spec at docs/v2-specs/grafana.md (commit ce977d7). FIRST user-supplied host (GRAFANA_URL, validated); dual Bearer/Basic auth (GRAFANA_AUTH); X-Grafana-Org-Id; 4 response families + 3 pagers (perPage vs perpage casing). Org-scoped COMPOSITE import IDs built at export from Container: orgID:token / orgID:name / 3-part orgID:folderUID:title (rule_group) / orgID:policy (singleton). Contact-point name-dedup; rule-group synthesis by (folderUID,ruleGroup); General-folder + fixed-role skips. Reviewed (2 agents): both APPROVE, no CRIT/HIGH/MED; LOW fixes (auth TrimSpace, http+Basic warn, org guard-case) remediated. permissions/annotation/organization deferred; SA-token/datasource-secure-fields/Cloud-stack excluded |
 | 10 | Honeycomb | pushed | 14 config resources (dataset/column/derived_column/query_annotation/flexible_board/trigger/slo/burn_alert + 6 typed recipients); spec at docs/v2-specs/honeycomb.md (commit e626c51). Fastly-style per-dataset FAN-OUT (/1/datasets → per-dataset sub-lists) + second-level per-SLO burn-alert fan-out + synthetic __all__ pass; X-Honeycomb-Team auth, US/EU base (https-forced), bare JSON arrays no pagination. Composite import IDs: <dataset>/<token> dataset-scoped, BARE for team-wide AND for __all__ env-wide variants (the subtle fork); column by key_name, derived_column by alias. Recipient type-split; classic-board skip. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED https-enforce + LOW (minor-pin, PathEscape ds, 401 early-out) remediated. query/dataset_definition/marker/board_view/v2-mgmt deferred; api_key + recipient secrets excluded/scrubbed |
 | 11 | PagerDuty | pushed | 18 config resources (service+integration/escalation_policy/schedule/team+membership/user+contact_method+notification_rule/business_service/maintenance_window/extension+servicenow/webhook_subscription/tag/response_play/ruleset+rule); spec at docs/v2-specs/pagerduty.md (commit 3ed91fc). Distinctive `Authorization: Token token=` header + vnd.pagerduty+json;version=2; US/EU region (https-forced); keyed offset/limit/`more` pager; From-header gating for response_plays. Import IDs: DOT (service_integration/ruleset_rule, parent-first) vs COLON (team_membership/user_contact_method/user_notification_rule, USER-first) vs bare. 5 fan-outs (service→integrations via include, team→members, user→contact/notif, ruleset→rules); extension-schema discriminator. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; LOW fixes (PathEscape fan-out ids, mw filter future+ongoing, drop email from label, 401 short-circuit) remediated. Event Orchestration/automation_actions/slack_connection deferred; integration_key/webhook/extension secrets Phase-B scrub |
-| 12 | Opsgenie | todo | |
+| 12 | Opsgenie | pushed | 16 config resources (team+routing_rule/user+contact+notification_rule/schedule+rotation/escalation/service+incident_rule/api+email integration/alert+notification policy/maintenance/heartbeat); spec at docs/v2-specs/opsgenie.md (commit a7c52f3). `Authorization: GenieKey` header; US/EU region (https-forced); data/paging.next SERVER-URL cursor — HOST-VALIDATED before re-sending the key (isOpsgenieURL, the Fastly next-link lesson). All SLASH composites; per-user fan-outs use DIFFERENT parents (user_contact by USERNAME, notification_rule by user_id); alert_policy flips bare(global)/team-slash; heartbeat by-name from nested data.heartbeats. Integration type-discriminator (API/Email only). Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED /v2/account→/v2/users fallback + LOW global-policy overwrite guard remediated. integration_action/custom_role (no import) + vendor integrations deferred; api_key Phase-B scrub. NOTE: 2nd review pair (session-limit re-run) |
 | 13 | Okta | todo | |
 | 14 | Auth0 | todo | |
 | 15 | LaunchDarkly | todo | |
@@ -218,8 +218,9 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
   reviewed scaffolds pushed. New Relic is the first GraphQL (NerdGraph) provider;
   Grafana is the first user-supplied-host provider (GRAFANA_URL); Honeycomb is a
   Fastly-style per-dataset fan-out; PagerDuty adds the `Token token=` auth + mixed
-  dot/colon composites — all reusable shapes for later providers. Phase-B (curation →
-  plan-clean) pending live creds per provider.
+  dot/colon composites; Opsgenie (#12, 16) adds the `GenieKey` auth + the
+  host-validated server-supplied `paging.next` cursor — all reusable shapes for later
+  providers. Phase-B (curation → plan-clean) pending live creds per provider.
 - **Deferred house-pattern cleanup (from PagerDuty review):** the shared `list()`
   error helper (copied across all providers from Fastly) lets a fatal 401 fall through
   to `hardFails++`+Warn before the `fatal` short-circuit. Harmless (fatal wins before
@@ -235,5 +236,5 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 2 — Opsgenie (#12), then Okta, Auth0, LaunchDarkly, Keycloak,
-  Logz.io, Mackerel, Vault.
+- **Next up:** Batch 2 — Okta (#13), then Auth0, LaunchDarkly, Keycloak, Logz.io,
+  Mackerel, Vault.
