@@ -158,7 +158,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 |---|----------|--------|-------|
 | 7 | Datadog | pushed | 13 config resources (monitors/dashboards/dashboard_lists/SLOs/synthetics/logs index+pipeline+metric/notebooks/security rules/downtimes/roles/users); spec at docs/v2-specs/datadog.md (commit 677066a). TWO auth headers (DD-API-KEY + DD-APPLICATION-KEY); site-configurable base (DD_HOST, forced https); THREE response families (v1 bare / v1 keyed / v2 JSON:API) + FOUR pagers; flex ddID (numeric notebook ids); flat-object attr fallback (security rules); redirect-refusing client. Reviewed (2 agents): HIGH notebook-id decode + MED flat isDefault + MED redirect-leak + LOW http-scheme all remediated. Integration plane + api/app keys excluded by non-enumeration |
 | 8 | New Relic | pushed | 16 config resources (one_dashboard/alert_policy/nrql_alert_condition/muting_rule/notification destination+channel/workflow/5 synthetics monitor types/workload/key_transaction/obfuscation rule+expression); spec at docs/v2-specs/newrelic.md (commit 1ab96ce). FIRST GraphQL provider — NerdGraph single-endpoint POST client, nextCursor pagination, 200-with-errors=failure, bounded 429/5xx backoff. Import-ID composites verified: alert_policy `<policy_id>:<account_id>` (account SECOND, reversed!), nrql_condition `<policy>:<cond>:<static|baseline>`, workload/muting_rule account-FIRST. Synthetics 6-way monitorType split; dashboard parent filter; workload workloadId per-entity follow-up; nrID flex string/number decode. Reviewed (2 agents): both APPROVE, no CRIT/HIGH; MED 429-backoff + LOW entityFilter-guard remediated. service_level/private_location/entity_tags/drop_rule deferred; api_access_key/secure_credential-value excluded |
-| 9 | Grafana | todo | |
+| 9 | Grafana | pushed | 14 config resources (dashboard/folder/data_source/unified-alerting provisioning: contact_point+notification_policy(singleton)+message_template+mute_timing+rule_group/team/service_account/playlist/library_panel/role+report(Enterprise best-effort)); spec at docs/v2-specs/grafana.md (commit ce977d7). FIRST user-supplied host (GRAFANA_URL, validated); dual Bearer/Basic auth (GRAFANA_AUTH); X-Grafana-Org-Id; 4 response families + 3 pagers (perPage vs perpage casing). Org-scoped COMPOSITE import IDs built at export from Container: orgID:token / orgID:name / 3-part orgID:folderUID:title (rule_group) / orgID:policy (singleton). Contact-point name-dedup; rule-group synthesis by (folderUID,ruleGroup); General-folder + fixed-role skips. Reviewed (2 agents): both APPROVE, no CRIT/HIGH/MED; LOW fixes (auth TrimSpace, http+Basic warn, org guard-case) remediated. permissions/annotation/organization deferred; SA-token/datasource-secure-fields/Cloud-stack excluded |
 | 10 | Honeycomb | todo | |
 | 11 | PagerDuty | todo | |
 | 12 | Opsgenie | todo | |
@@ -214,9 +214,10 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
   complete on `feat/v2-breadth`: Cloudflare (#1, 16), DigitalOcean (#2, 22),
   Fastly (#3, 11), NS1 (#4, 10), Linode (#5, 18), Vultr (#6, 16) — reviewed
   scaffolds; specs at docs/v2-specs/. BATCH 2 in progress: Datadog (#7, 13),
-  New Relic (#8, 16) — reviewed scaffolds pushed. New Relic is the first GraphQL
-  (NerdGraph) provider — a reusable shape for later GraphQL-based providers. Phase-B
-  (curation → plan-clean) pending live creds per provider.
+  New Relic (#8, 16), Grafana (#9, 14) — reviewed scaffolds pushed. New Relic is the
+  first GraphQL (NerdGraph) provider; Grafana is the first user-supplied-host provider
+  (GRAFANA_URL) — both reusable shapes for later providers. Phase-B (curation →
+  plan-clean) pending live creds per provider.
 - **Cross-provider note (from Datadog security review):** all HTTP providers use
   `http.DefaultClient`, which auto-follows redirects and does NOT strip custom auth
   headers on a cross-host 3xx. Datadog now uses a redirect-refusing client; the other
@@ -225,5 +226,5 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 2 — Grafana (#9), then Honeycomb, PagerDuty, Opsgenie, Okta,
-  Auth0, LaunchDarkly, Keycloak, Logz.io, Mackerel, Vault.
+- **Next up:** Batch 2 — Honeycomb (#10), then PagerDuty, Opsgenie, Okta, Auth0,
+  LaunchDarkly, Keycloak, Logz.io, Mackerel, Vault.
