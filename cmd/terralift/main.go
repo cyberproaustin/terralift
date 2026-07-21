@@ -33,6 +33,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/okta"
 	_ "github.com/cyberproaustin/terralift/internal/providers/opsgenie"
 	_ "github.com/cyberproaustin/terralift/internal/providers/pagerduty"
+	_ "github.com/cyberproaustin/terralift/internal/providers/vault"
 	_ "github.com/cyberproaustin/terralift/internal/providers/vultr"
 )
 
