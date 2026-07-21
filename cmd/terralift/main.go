@@ -21,6 +21,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/fastly"
 	_ "github.com/cyberproaustin/terralift/internal/providers/gcp"
 	_ "github.com/cyberproaustin/terralift/internal/providers/github"
+	_ "github.com/cyberproaustin/terralift/internal/providers/gitlab"
 	_ "github.com/cyberproaustin/terralift/internal/providers/grafana"
 	_ "github.com/cyberproaustin/terralift/internal/providers/honeycomb"
 	_ "github.com/cyberproaustin/terralift/internal/providers/keycloak"

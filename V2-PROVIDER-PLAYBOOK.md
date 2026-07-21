@@ -174,7 +174,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 
 | # | Provider | Status | Notes |
 |---|----------|--------|-------|
-| 20 | GitLab | todo | |
+| 20 | GitLab | pushed | 16 config-core TF types (group + project + group/project_variable + group/project_label + group/project_hook + deploy_key + branch_protection + tag_protection + group/project_membership + project_milestone + project_share_group + group_ldap_link); spec at docs/v2-specs/gitlab.md. Provider gitlabhq/gitlab (~> 17.0). TWO-ROOT fan-out (groups + projects the token can manage via membership=true&min_access_level=40; subgroups come back FLAT, no recursion), then durable config children. `PRIVATE-TOKEN` header auth (env GITLAB_TOKEN); base GITLAB_BASE_URL default https://gitlab.com/api/v4 — ALREADY carries /api/v4 (unlike Vault /v1/; bare host appends once, existing kept, userinfo-splice rejected, http-non-loopback cleartext warn); redirect-refusing client. Pagination: offset ?page=&per_page=100 following the X-Next-Page response header (next==page guard). FOUR composite import shapes (the defining hazard, all verified vs real docs): bare numeric id (group/project) / 2-part `<parent>:<leaf>` (leaf=numeric id for hook/label/deploy_key/membership/milestone/share_group, NAME for branch/tag protection) / 3-part `<parent>:<key>:<env_scope>` (variables, default scope *) / 4-part `<group>:<provider>:<cn>:<filter>` (ldap, cn XOR filter one-empty). Precomputed + EscapeHCLTemplate'd, stored Properties["importID"] NOT "token" (GitLab full of real tokens). project_share_group derived from the project object's shared_with_groups (no list endpoint). PARAMOUNT secret: the CI/CD variable VALUE is returned on read → glVariable decodes ONLY key+scope, never value (grep-verified); hook token/custom_headers/url_variables + project runners_token never decoded; access-token resources (PAT/project/group/deploy tokens) HARD-EXCLUDED, never enumerated. Reviewed (2 agents): both APPROVE, no CRIT/HIGH/MED-blocking; remediated http-cleartext preflight warn + ldap inventory-key separator; group_label id-vs-name is a Phase-B VERIFY (canonical doc uses name, we emit id). admin planes (GET /users, system hooks) + CI-job-token /version fallback + archived-project filter deferred; variable value/hook token/runners_token Phase-B scrub |
 | 21 | Azure DevOps | todo | |
 | 22 | Entra ID (azuread) | todo | good dogfood candidate (live tenant) |
 | 23 | Heroku | todo | |
@@ -246,7 +246,7 @@ Status legend: `todo` · `research` · `built` (compiles + tests) · `reviewed`
 - **Review cadence:** complex/novel-client providers get 2 parallel reviewers
   (correctness + security); simple ones (bare arrays, established pattern) get 1
   combined reviewer — saves context without losing coverage.
-- **Next up:** Batch 3 — GitLab (#20), then Azure DevOps, Entra ID/azuread, Heroku, Octopus Deploy, commercetools, Opal. (Batch 2 COMPLETE 13/13: Logz.io #17 + Mackerel #18 + Vault #19 all pushed. 19/40 built.)
+- **Next up:** Batch 3 — Azure DevOps (#21), then Entra ID/azuread, Heroku, Octopus Deploy, commercetools, Opal. (GitLab #20 pushed. Batch 2 COMPLETE 13/13. 20/40 built.)
 - **Constructed-host validation (from Auth0 review):** Auth0 now validates AUTH0_DOMAIN to a
   bare-hostname shape (rejects `@`/userinfo/path so the token can't go to a foreign host on
   the first request, before the redirect-refuser engages). Okta's cleanHostPart
