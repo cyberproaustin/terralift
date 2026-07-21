@@ -15,6 +15,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/auth0"
 	_ "github.com/cyberproaustin/terralift/internal/providers/aws"
 	_ "github.com/cyberproaustin/terralift/internal/providers/azure"
+	_ "github.com/cyberproaustin/terralift/internal/providers/azuredevops"
 	_ "github.com/cyberproaustin/terralift/internal/providers/cloudflare"
 	_ "github.com/cyberproaustin/terralift/internal/providers/datadog"
 	_ "github.com/cyberproaustin/terralift/internal/providers/digitalocean"
