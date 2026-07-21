@@ -21,6 +21,7 @@ import (
 	_ "github.com/cyberproaustin/terralift/internal/providers/github"
 	_ "github.com/cyberproaustin/terralift/internal/providers/linode"
 	_ "github.com/cyberproaustin/terralift/internal/providers/ns1"
+	_ "github.com/cyberproaustin/terralift/internal/providers/vultr"
 )
 
 // buildVersion is stamped at release build time with
