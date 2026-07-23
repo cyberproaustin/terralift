@@ -108,6 +108,14 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg string) (*provider.ContainerExport, error) {
 	san := naming.Sanitize(rg)
 	dir := filepath.Join(run.Paths.Export, san)
+	// Absolutize before handing to aztfexport: we set the child's working dir to `dir` AND pass it
+	// as `-o dir`. If `dir` is relative (the default artifact root is `artifacts/…`), aztfexport
+	// re-roots the relative `-o` against its own cwd (== dir) and writes the mapping to a NESTED
+	// dir/dir/… path, which we then can't read back ("cannot find the file"). An absolute path is
+	// resolved the same regardless of cwd.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
