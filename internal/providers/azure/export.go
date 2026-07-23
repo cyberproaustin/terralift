@@ -347,6 +347,14 @@ func excludedReason(tfType, resourceID string) string {
 		strings.Contains(strings.ToLower(resourceID), "/consumergroups/$default") {
 		return "Azure built-in $Default consumer group"
 	}
+	// `master` is the SQL Server system database: it exists on every server, is not
+	// user-created and cannot be managed as an azurerm_mssql_database. Excluding it
+	// keeps it out of the coverage GAP list, where it was being reported as an
+	// unsupported type it never was.
+	if tfType == "azurerm_mssql_database" &&
+		strings.HasSuffix(strings.ToLower(resourceID), "/databases/master") {
+		return "Azure built-in master system database"
+	}
 	switch tfType {
 	case "azurerm_key_vault_secret",
 		"azurerm_key_vault_key",
@@ -444,17 +452,70 @@ func aztfexportBin() string {
 
 // runAztfexport runs aztfexport in dir and returns combined output. aztfexport
 // emits progress on stderr, so capture both streams for diagnostics.
-//
-// TF_PLUGIN_CACHE_DIR is stripped from the child environment: aztfexport runs a
-// terraform init then per-resource `terraform import`, and a shared plugin cache
-// leaves the working dir's lock file inconsistent with the cached provider,
-// which makes every import fail with "Required plugins are not installed".
 func runAztfexport(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, aztfexportBin(), args...)
 	cmd.Dir = dir
-	cmd.Env = withoutEnv(os.Environ(), "TF_PLUGIN_CACHE_DIR")
+	cmd.Env = aztfexportEnv(args)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// importsState reports whether this invocation will run per-resource `terraform
+// import`. Only that path is incompatible with a shared provider plugin cache
+// (see aztfexportEnv). `-g` (generate-mapping-only) and `--hcl-only` both author
+// without ever importing into state.
+func importsState(args []string) bool {
+	for _, a := range args {
+		if a == "-g" || a == "--generate-mapping-file" || a == "--hcl-only" {
+			return false
+		}
+	}
+	return true
+}
+
+// aztfexportEnv builds the child environment, deciding whether the Terraform
+// provider plugin cache may be shared.
+//
+// This matters enormously for wall-clock: aztfexport pre-creates one temp import
+// directory per --parallelism (default 10) and runs `terraform init` in each, PLUS
+// once in the output dir — ~11 provider installs per invocation, and it does this
+// even for the read-only `-g` discovery pass that never imports anything. We invoke
+// it twice per resource group, so an uncached run downloads the (very large) azurerm
+// provider ~22 times per group. That, not CPU, is why a dense group takes hours.
+//
+// The cache is NOT safe for the import path: a shared cache leaves the working
+// dir's lock file inconsistent with the cached provider, and every per-resource
+// `terraform import` then fails with "Required plugins are not installed". So we
+// keep stripping it there, and share it only for the non-importing passes.
+func aztfexportEnv(args []string) []string {
+	env := os.Environ()
+	if importsState(args) {
+		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
+	}
+	cache := pluginCacheDir()
+	if cache == "" {
+		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
+	}
+	return append(withoutEnv(env, "TF_PLUGIN_CACHE_DIR"), "TF_PLUGIN_CACHE_DIR="+cache)
+}
+
+// pluginCacheDir resolves the provider cache directory, honoring an operator-set
+// TF_PLUGIN_CACHE_DIR and otherwise defaulting to a stable per-user location.
+// Terraform requires the directory to already exist. Returns "" if it can't be
+// established, in which case callers fall back to an uncached (correct, slow) run.
+func pluginCacheDir() string {
+	dir := strings.TrimSpace(os.Getenv("TF_PLUGIN_CACHE_DIR"))
+	if dir == "" {
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(base, "terralift", "tf-plugin-cache")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
 }
 
 func withoutEnv(env []string, key string) []string {
