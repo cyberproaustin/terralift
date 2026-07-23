@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,9 +38,12 @@ func ParseLevel(s string) Level {
 }
 
 // Logger is a minimal leveled, phase-tagged logger. Writes to stderr so stdout
-// stays clean for machine-readable output.
+// stays clean for machine-readable output. Safe for concurrent use: phases that
+// fan out (the Azure export runs resource groups in parallel) log from multiple
+// goroutines, and an unsynchronized Fprintf would interleave partial lines.
 type Logger struct {
 	Min Level
+	mu  sync.Mutex
 }
 
 // NewLogger returns a logger that emits records at or above min.
@@ -54,6 +58,8 @@ func (l *Logger) log(lvl Level, phase, msg string) {
 	if phase != "" {
 		prefix = "[" + phase + "] "
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	fmt.Fprintf(os.Stderr, "%s %-7s %s%s\n", ts, levelTags[lvl], prefix, msg)
 }
 

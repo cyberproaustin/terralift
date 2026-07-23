@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cyberproaustin/terralift/internal/core"
 	"github.com/cyberproaustin/terralift/internal/hcl"
@@ -88,21 +90,82 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 		mode = "hcl-only"
 	}
 
+	rgs := sortedContainers(inv)
+	results := make([]*provider.ContainerExport, len(rgs))
+	errs := make([]error, len(rgs))
+	doRG := func(i int) { results[i], errs[i] = exportRG(ctx, run, inv, rgs[i]) }
+
+	// Groups export concurrently: exportRG is safe to run in parallel (each writes to
+	// its own per-group directory and only reads the inventory).
+	//
+	// The one hazard is a COLD shared provider cache — each aztfexport invocation starts
+	// ~parallelism concurrent `terraform init`s, and concurrent inits racing to populate
+	// an empty cache is a known file-lock failure. So when (and only when) the cache is
+	// cold, one group runs alone first to populate it. Gating on warmth matters: always
+	// serializing the first group would mean a two-group export gets no parallelism at
+	// all, which is the common case.
+	start := 0
+	if len(rgs) > 0 && !providerCacheWarm() {
+		doRG(0)
+		start = 1
+	}
+	if len(rgs) > start {
+		sem := make(chan struct{}, exportParallelism())
+		var wg sync.WaitGroup
+		for i := start; i < len(rgs); i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				doRG(i)
+			}(i)
+		}
+		wg.Wait()
+	}
+
+	// Assemble in the original sorted order so the export is deterministic regardless
+	// of completion order.
 	var containers []provider.ContainerExport
-	for _, rg := range sortedContainers(inv) {
-		ce, err := exportRG(ctx, run, inv, rg)
-		if err != nil {
-			run.Log.Warn("Export", "resource group %q: %v (skipping)", rg, err)
+	for i, rg := range rgs {
+		if errs[i] != nil {
+			run.Log.Warn("Export", "resource group %q: %v (skipping)", rg, errs[i])
 			continue
 		}
-		if ce != nil {
-			containers = append(containers, *ce)
+		if results[i] != nil {
+			containers = append(containers, *results[i])
 		}
 	}
 	if len(containers) == 0 {
 		return nil, errors.New("export produced no resource groups")
 	}
 	return &provider.ExportResult{Mode: mode, Containers: containers}, nil
+}
+
+// providerCacheWarm reports whether the shared provider plugin cache already holds
+// an azurerm provider. Terraform lays the cache out as
+// <cache>/registry.terraform.io/hashicorp/azurerm/<version>/<os_arch>/, so a match
+// there means a concurrent fan-out will only READ the cache, not race to populate it.
+func providerCacheWarm() bool {
+	dir := pluginCacheDir()
+	if dir == "" {
+		return false
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "*"))
+	return err == nil && len(matches) > 0
+}
+
+// exportParallelism bounds how many resource groups export concurrently. Kept
+// deliberately low: each group's aztfexport already runs ~10 operations in parallel
+// internally, and the shared limit that actually bites is ARM read throttling on the
+// subscription, not local CPU. TERRALIFT_EXPORT_PARALLELISM overrides it.
+func exportParallelism() int {
+	if v := strings.TrimSpace(os.Getenv("TERRALIFT_EXPORT_PARALLELISM")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 3
 }
 
 func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg string) (*provider.ContainerExport, error) {
