@@ -48,7 +48,7 @@ func Reconcile(ctx context.Context, run *core.Run, inv *model.Inventory, export 
 	meta := make(map[string]reconcile.MissingResource, len(inv.Resources))
 	for id, r := range inv.Resources {
 		enumIDs = append(enumIDs, id)
-		meta[id] = reconcile.MissingResource{ID: r.ID, Type: r.NativeType, Name: r.Name, Container: r.Container}
+		meta[id] = reconcile.MissingResource{ID: r.ID, Type: r.NativeType, Name: r.Name, Container: r.Container, TFType: r.TFType}
 	}
 	sort.Strings(enumIDs)
 	var exported, excluded []string
@@ -491,11 +491,37 @@ func stripBackendBlocks(src string) (string, int) {
 func coverageMD(c reconcile.CoverageReport) string {
 	var b strings.Builder
 	b.WriteString("# Coverage Gap Report (control-plane only)\n\n")
-	fmt.Fprintf(&b, "- Enumerated: **%d**\n- Considered (enumerated − excluded): **%d**\n- Of those, exported: **%d** (**%.1f%%**)\n- Intentionally excluded (managed/default/noise): **%d**\n- Gap (unsupported type): **%d**\n\n",
+	fmt.Fprintf(&b, "- Enumerated: **%d**\n- Considered (enumerated − excluded): **%d**\n- Of those, exported: **%d** (**%.1f%%**)\n- Intentionally excluded (managed/default/noise): **%d**\n- Gap: **%d**\n\n",
 		c.Enumerated, c.Considered, c.Covered, c.CoveragePct, c.Excluded, c.Gap)
-	if len(c.Missing) > 0 {
-		b.WriteString("## Gap detail (unsupported types)\n\n")
-		for _, m := range c.Missing {
+	// A gap has two very different causes, and conflating them hides a permissions
+	// problem: either no Terraform type exists for the resource (nothing to do), or we
+	// resolved a type and the export failed anyway — usually because the principal
+	// lacks a required action, so the provider read 403s and the resource never
+	// reaches the generated HCL.
+	var unsupported, failed []reconcile.MissingResource
+	for _, m := range c.Missing {
+		if m.TFType == "" {
+			unsupported = append(unsupported, m)
+		} else {
+			failed = append(failed, m)
+		}
+	}
+	if len(failed) > 0 {
+		b.WriteString("## Mapped, but not exported\n\n")
+		b.WriteString("These have a Terraform type — the export did not produce a block for them. ")
+		b.WriteString("The usual cause is **insufficient permissions**: the azurerm provider reads ")
+		b.WriteString("some resources via *actions* that `Reader` does not grant (e.g. ")
+		b.WriteString("`Microsoft.Storage/storageAccounts/listKeys/action`, ")
+		b.WriteString("`Microsoft.Web/sites/config/list/action`), the read returns 403, and the ")
+		b.WriteString("resource is skipped. Re-run with a principal that can perform those actions.\n\n")
+		for _, m := range failed {
+			fmt.Fprintf(&b, "- `%s` %s → `%s`\n", m.Type, m.Name, m.TFType)
+		}
+		b.WriteString("\n")
+	}
+	if len(unsupported) > 0 {
+		b.WriteString("## Unsupported types (no Terraform mapping)\n\n")
+		for _, m := range unsupported {
 			fmt.Fprintf(&b, "- `%s` %s\n", m.Type, m.Name)
 		}
 	}
