@@ -30,10 +30,16 @@ func enumerate(ctx context.Context, run *core.Run) (*model.Inventory, error) {
 		Resources:   make(map[string]*model.Resource, len(rows)),
 		Containers:  map[string]*model.Container{},
 	}
+	canon := canonicalRGs(ctx, sub)
 	for _, r := range rows {
 		res := rowToResource(r)
 		if res.ID == "" {
 			continue
+		}
+		// Resource Graph lowercases the `resourceGroup` column, but aztfexport (Phase 3) matches the
+		// resource-group name CASE-SENSITIVELY — restore the real casing so the export step finds it.
+		if c, ok := canon[strings.ToLower(res.Container)]; ok {
+			res.Container = c
 		}
 		inv.Resources[strings.ToLower(res.ID)] = res
 	}
@@ -82,6 +88,25 @@ func filterIAMByContainer(inv *model.Inventory, want map[string]bool) {
 		}
 	}
 	inv.IAM = kept
+}
+
+// canonicalRGs returns lowercased-RG-name -> canonical-RG-name for every resource group in the
+// subscription. The Resource Graph `Resources` table lowercases its `resourceGroup` column, but
+// aztfexport matches the resource-group name CASE-SENSITIVELY, so we recover the real casing from
+// the ResourceContainers table (whose `name` preserves it). Best-effort: on error it returns nil and
+// callers keep the lowercased name (aztfexport would then miss that group, so this restores it).
+func canonicalRGs(ctx context.Context, sub string) map[string]string {
+	rows, err := graphQuery(ctx, sub, `ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' | project id, name`)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		if n := str(r["name"]); n != "" {
+			out[strings.ToLower(n)] = n
+		}
+	}
+	return out
 }
 
 func rowToResource(r map[string]any) *model.Resource {
