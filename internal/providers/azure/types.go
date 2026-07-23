@@ -48,6 +48,36 @@ func azureTypeToTFType(azureType string) string {
 	return azureTypeToTFExtra[k] // full native-resource sweep (coverage.go)
 }
 
+// azureTypeToTFTypeKind resolves the ARM types whose Terraform type is NOT
+// determined by the ARM type alone. Microsoft.Web/sites (and its slots) is a single
+// ARM type covering four Terraform resources — Windows vs Linux, web app vs
+// function app — discriminated only by the `kind` property ("app", "app,linux",
+// "functionapp", "functionapp,linux", plus ",container" variants). The static map
+// can only guess, which mislabels every Windows app as Linux; Resource Graph
+// already projects `kind`, so use it. Falls back to the static map when kind is
+// absent or the type is not kind-discriminated.
+func azureTypeToTFTypeKind(azureType, kind string) string {
+	t := strings.ToLower(azureType)
+	k := strings.ToLower(kind)
+	if k != "" && (t == "microsoft.web/sites" || t == "microsoft.web/sites/slots") {
+		suffix := ""
+		if t == "microsoft.web/sites/slots" {
+			suffix = "_slot"
+		}
+		switch {
+		case strings.Contains(k, "functionapp") && strings.Contains(k, "linux"):
+			return "azurerm_linux_function_app" + suffix
+		case strings.Contains(k, "functionapp"):
+			return "azurerm_windows_function_app" + suffix
+		case strings.Contains(k, "linux"):
+			return "azurerm_linux_web_app" + suffix
+		default:
+			return "azurerm_windows_web_app" + suffix
+		}
+	}
+	return azureTypeToTFType(azureType)
+}
+
 // roleInfo is a resolved role definition: display name + privilege flag.
 type roleInfo struct {
 	name       string

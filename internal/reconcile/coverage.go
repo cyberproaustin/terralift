@@ -12,6 +12,14 @@ type MissingResource struct {
 	Type      string `json:"type"`
 	Name      string `json:"name"`
 	Container string `json:"container"`
+	// TFType is the Terraform type resolved during enumeration. EMPTY means there is
+	// genuinely no mapping (an unsupported type). NON-EMPTY means we knew how to
+	// onboard it and the EXPORT failed — most often because the calling principal
+	// lacks a required action (e.g. Reader cannot call
+	// Microsoft.Storage/storageAccounts/listKeys/action, so the provider read 403s and
+	// the resource never reaches the generated HCL). Reporting both as "unsupported
+	// type" hides a permissions problem behind a coverage number.
+	TFType string `json:"tfType,omitempty"`
 }
 
 // CoverageReport is the set-diff oracle. It separates INTENTIONAL exclusions

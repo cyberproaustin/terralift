@@ -129,3 +129,40 @@ func TestFilterIAMByContainer(t *testing.T) {
 func quietRun() *core.Run {
 	return &core.Run{Log: core.NewLogger(core.LevelError)}
 }
+
+// Microsoft.Web/sites is one ARM type covering four TF resources; only `kind`
+// distinguishes Windows/Linux and web/function. Guessing Linux mislabels every
+// Windows app (the real-world bug: azurerm_windows_web_app reported as a gap).
+func TestAzureTypeToTFTypeKind(t *testing.T) {
+	cases := []struct{ typ, kind, want string }{
+		{"microsoft.web/sites", "app", "azurerm_windows_web_app"},
+		{"microsoft.web/sites", "app,linux", "azurerm_linux_web_app"},
+		{"microsoft.web/sites", "functionapp", "azurerm_windows_function_app"},
+		{"microsoft.web/sites", "functionapp,linux", "azurerm_linux_function_app"},
+		{"microsoft.web/sites", "app,linux,container", "azurerm_linux_web_app"},
+		{"microsoft.web/sites/slots", "app", "azurerm_windows_web_app_slot"},
+		{"microsoft.web/sites/slots", "app,linux", "azurerm_linux_web_app_slot"},
+		{"microsoft.web/sites/slots", "functionapp", "azurerm_windows_function_app_slot"},
+		// non-kind-discriminated types are unaffected
+		{"microsoft.keyvault/vaults", "", "azurerm_key_vault"},
+		{"microsoft.storage/storageaccounts", "StorageV2", "azurerm_storage_account"},
+	}
+	for _, c := range cases {
+		if got := azureTypeToTFTypeKind(c.typ, c.kind); got != c.want {
+			t.Errorf("azureTypeToTFTypeKind(%q, %q) = %q, want %q", c.typ, c.kind, got, c.want)
+		}
+	}
+}
+
+// The SQL `master` system database is not user-manageable and must be excluded, not
+// reported as an unsupported-type gap.
+func TestExcludesMasterSystemDatabase(t *testing.T) {
+	id := "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Sql/servers/srv/databases/master"
+	if r := excludedReason("azurerm_mssql_database", id); r == "" {
+		t.Error("master system database should be excluded")
+	}
+	user := "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Sql/servers/srv/databases/appdb"
+	if r := excludedReason("azurerm_mssql_database", user); r != "" {
+		t.Errorf("user database must NOT be excluded, got %q", r)
+	}
+}

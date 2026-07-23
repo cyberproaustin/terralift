@@ -140,3 +140,33 @@ func TestWriteImportBlocksFromStateNoState(t *testing.T) {
 		t.Error("import.tf written when there was no state")
 	}
 }
+
+// The provider plugin cache may be shared for the non-importing passes (`-g`
+// discovery and `--hcl-only` authoring) but must stay stripped for the per-resource
+// `terraform import` path, which a shared cache breaks.
+func TestImportsStateGatesPluginCache(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"rg -g discovery does not import", []string{"rg", "-g", "-n", "--plain-ui", "-o", "d", "rg1"}, false},
+		{"map --hcl-only does not import", []string{"map", "-n", "-k", "-f", "-o", "d", "--hcl-only", "m.json"}, false},
+		{"map without --hcl-only imports", []string{"map", "-n", "-k", "-f", "-o", "d", "m.json"}, true},
+	}
+	for _, c := range cases {
+		if got := importsState(c.args); got != c.want {
+			t.Errorf("%s: importsState = %v, want %v", c.name, got, c.want)
+		}
+		env := aztfexportEnv(c.args)
+		var has bool
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "TF_PLUGIN_CACHE_DIR=") {
+				has = true
+			}
+		}
+		if c.want && has {
+			t.Errorf("%s: import path must NOT get a shared plugin cache", c.name)
+		}
+	}
+}

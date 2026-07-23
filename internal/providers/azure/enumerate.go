@@ -116,7 +116,9 @@ func rowToResource(r map[string]any) *model.Resource {
 		ID:         id,
 		Name:       str(r["name"]),
 		NativeType: nativeType,
-		TFType:     azureTypeToTFType(nativeType),
+		// kind-aware: Microsoft.Web/sites is Windows-vs-Linux / web-vs-function only
+		// by its `kind`, which the floor query already projects.
+		TFType:     azureTypeToTFTypeKind(nativeType, str(r["kind"])),
 		Container:  str(r["resourceGroup"]),
 		Location:   str(r["location"]),
 		Tags:       toStringMap(r["tags"]),
