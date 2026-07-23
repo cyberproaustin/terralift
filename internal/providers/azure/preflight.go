@@ -24,6 +24,13 @@ func checkDependencies(ctx context.Context, run *core.Run) (*provider.Dependency
 	if rep.Tools["az"] == "" {
 		rep.OK = false
 		rep.Missing = append(rep.Missing, "az (Azure CLI)")
+	} else if v := ensureGraphExtension(ctx); v != "" {
+		// Phase 2 enumeration uses `az graph query`, which lives in the resource-graph extension.
+		// Ensure it up front (idempotent) so a fresh machine installs it here rather than hitting a
+		// non-interactive auto-install prompt mid-enumeration.
+		rep.Tools["resource-graph"] = v
+	} else {
+		rep.Notes = append(rep.Notes, "az resource-graph extension unavailable — run `az extension add --name resource-graph` (Phase 2 enumeration needs it)")
 	}
 	rep.Tools["aztfexport"] = aztfexportVersion(ctx)
 	if rep.Tools["aztfexport"] == "" {
@@ -83,6 +90,30 @@ func azVersion(ctx context.Context) string {
 		return s
 	}
 	return ""
+}
+
+// ensureGraphExtension makes sure the `resource-graph` az extension (which provides `az graph
+// query`) is installed, installing it non-interactively if absent. Returns the installed version,
+// or "" if it is missing and could not be installed (e.g. offline).
+func ensureGraphExtension(ctx context.Context) string {
+	if v := graphExtVersion(ctx); v != "" {
+		return v
+	}
+	cmd := exec.CommandContext(ctx, azBin(), "extension", "add", "--name", "resource-graph", "--only-show-errors")
+	cmd.Env = azEnv()
+	_ = cmd.Run() // best-effort; the version re-check is the source of truth
+	return graphExtVersion(ctx)
+}
+
+// graphExtVersion returns the installed resource-graph extension version, or "" if not installed.
+func graphExtVersion(ctx context.Context) string {
+	var e struct {
+		Version string `json:"version"`
+	}
+	if err := runAz(ctx, &e, "extension", "show", "--name", "resource-graph"); err != nil {
+		return ""
+	}
+	return e.Version
 }
 
 var aztfexportVer = regexp.MustCompile(`v?\d+\.\d+\.\d+\S*`)
