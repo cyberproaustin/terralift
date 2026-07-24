@@ -253,10 +253,11 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 		args = append(args, "--hcl-only")
 	}
 	args = append(args, mapPath)
-	if out, err := runAztfexport(ctx, dir, args...); err != nil {
+	mapOut, mapErr := runAztfexport(ctx, dir, args...)
+	if mapErr != nil {
 		// Non-fatal: -k means partial success is expected; parse whatever HCL landed.
-		run.Log.Warn("Export", "%s: aztfexport map reported errors (continuing): %v", rg, err)
-		run.Log.Verbose("Export", "%s", hcl.Tail(out, 20))
+		run.Log.Warn("Export", "%s: aztfexport map reported errors (continuing): %v", rg, mapErr)
+		run.Log.Verbose("Export", "%s", hcl.Tail(mapOut, 20))
 	}
 
 	// 4b. scrub leaked single secrets from main.tf (app config is left intact — it
@@ -311,6 +312,19 @@ func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg strin
 		}
 	}
 	run.Log.Info("Export", "%s: %d mapped, %d excluded, %d gap -> %s", rg, len(mapped), len(excluded), len(gaps), dir)
+
+	// When a group has gaps, persist aztfexport's full `map` output so the operator can
+	// see EXACTLY why each resource was dropped — a permission 403, an import the azurerm
+	// provider could not perform, or a transient ARM throttle — instead of guessing from
+	// the coverage report. It stays in the per-group export dir (never shipped: the
+	// packager only copies .tf/.zip, and this can echo resource detail), alongside the
+	// terraform state aztfexport already writes there. 0600 for the same reason.
+	if len(gaps) > 0 && strings.TrimSpace(mapOut) != "" {
+		logPath := filepath.Join(dir, "aztfexport-map.log")
+		if err := os.WriteFile(logPath, []byte(mapOut), 0o600); err == nil {
+			run.Log.Info("Export", "%s: %d gap(s) — aztfexport's per-resource reason is in %s", rg, len(gaps), logPath)
+		}
+	}
 
 	// Replace aztfexport's local-dev provider.tf with a clean, pipeline-ready one
 	// (OIDC-capable via env; no use_cli/use_msi pinning that would block CI).

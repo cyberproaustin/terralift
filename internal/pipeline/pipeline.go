@@ -508,12 +508,23 @@ func coverageMD(c reconcile.CoverageReport) string {
 	}
 	if len(failed) > 0 {
 		b.WriteString("## Mapped, but not exported\n\n")
-		b.WriteString("These have a Terraform type — the export did not produce a block for them. ")
-		b.WriteString("The usual cause is **insufficient permissions**: the azurerm provider reads ")
-		b.WriteString("some resources via *actions* that `Reader` does not grant (e.g. ")
+		b.WriteString("These have a Terraform type, but the export tool (aztfexport) produced no ")
+		b.WriteString("block for them. There are two common causes — check which applies before ")
+		b.WriteString("assuming either:\n\n")
+		b.WriteString("1. **Insufficient permissions.** The azurerm provider reads some resources ")
+		b.WriteString("via *actions* that `Reader` does not grant (e.g. ")
 		b.WriteString("`Microsoft.Storage/storageAccounts/listKeys/action`, ")
-		b.WriteString("`Microsoft.Web/sites/config/list/action`), the read returns 403, and the ")
-		b.WriteString("resource is skipped. Re-run with a principal that can perform those actions.\n\n")
+		b.WriteString("`Microsoft.Web/sites/config/list/action`); the read returns 403 and the ")
+		b.WriteString("resource is skipped. If you ran as `Reader`, re-run with a principal that ")
+		b.WriteString("can perform those actions.\n")
+		b.WriteString("2. **The provider could not import the resource** — and this happens *even ")
+		b.WriteString("with full access*. Some Azure types are unreliable to import (App Service ")
+		b.WriteString("apps and slots, API connections, and certificates are the usual offenders), ")
+		b.WriteString("and transient ARM throttling under concurrency can drop others.\n\n")
+		b.WriteString("**To see the exact reason per resource**, read `aztfexport-map.log` in that ")
+		b.WriteString("group's export directory (TerraLift writes it whenever a group has gaps), or ")
+		b.WriteString("re-run with `-v`. If throttling looks likely, lower ")
+		b.WriteString("`TERRALIFT_EXPORT_PARALLELISM` (default 3).\n\n")
 		for _, m := range failed {
 			fmt.Fprintf(&b, "- `%s` %s → `%s`\n", m.Type, m.Name, m.TFType)
 		}
