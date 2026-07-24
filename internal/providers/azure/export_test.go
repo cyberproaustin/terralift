@@ -141,62 +141,14 @@ func TestWriteImportBlocksFromStateNoState(t *testing.T) {
 	}
 }
 
-// providerCacheWarm must recognize a COMPLETE provider binary and reject a truncated
-// stub — the exact corruption a cold-cache race leaves behind. Treating a truncated
-// binary as warm would share it into a concurrent fan-out and fail every import.
-func TestProviderCacheWarm(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("TF_PLUGIN_CACHE_DIR", dir) // pluginCacheDir honors this
-	if providerCacheWarm() {
-		t.Fatal("empty cache must not be warm")
-	}
-	base := filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "4.58.0", "windows_amd64")
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	bin := filepath.Join(base, "terraform-provider-azurerm_v4.58.0_x5.exe")
-	// A truncated binary (the race-corruption case) must NOT count as warm.
-	if err := os.WriteFile(bin, []byte("partial"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if providerCacheWarm() {
-		t.Fatal("a truncated provider binary must not count as warm")
-	}
-	// A plausibly-complete binary (>1 MiB) counts as warm.
-	if err := os.WriteFile(bin, make([]byte, 1<<20+1), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !providerCacheWarm() {
-		t.Fatal("a complete provider binary should count as warm")
-	}
-}
-
-// The provider plugin cache may be shared for the non-importing passes (`-g`
-// discovery and `--hcl-only` authoring) but must stay stripped for the per-resource
-// `terraform import` path, which a shared cache breaks.
-func TestImportsStateGatesPluginCache(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"rg -g discovery does not import", []string{"rg", "-g", "-n", "--plain-ui", "-o", "d", "rg1"}, false},
-		{"map --hcl-only does not import", []string{"map", "-n", "-k", "-f", "-o", "d", "--hcl-only", "m.json"}, false},
-		{"map without --hcl-only imports", []string{"map", "-n", "-k", "-f", "-o", "d", "m.json"}, true},
-	}
-	for _, c := range cases {
-		if got := importsState(c.args); got != c.want {
-			t.Errorf("%s: importsState = %v, want %v", c.name, got, c.want)
-		}
-		env := aztfexportEnv(c.args)
-		var has bool
-		for _, kv := range env {
-			if strings.HasPrefix(kv, "TF_PLUGIN_CACHE_DIR=") {
-				has = true
-			}
-		}
-		if c.want && has {
-			t.Errorf("%s: import path must NOT get a shared plugin cache", c.name)
+// aztfexportEnv must ALWAYS strip TF_PLUGIN_CACHE_DIR: a shared plugin cache raced by
+// aztfexport's concurrent per-worker `terraform init`s corrupts the provider binary on
+// Windows. No aztfexport invocation may inherit it.
+func TestAztfexportEnvStripsPluginCache(t *testing.T) {
+	t.Setenv("TF_PLUGIN_CACHE_DIR", filepath.Join("some", "cache"))
+	for _, kv := range aztfexportEnv() {
+		if strings.HasPrefix(kv, "TF_PLUGIN_CACHE_DIR=") {
+			t.Fatalf("aztfexportEnv must strip TF_PLUGIN_CACHE_DIR, got %q", kv)
 		}
 	}
 }

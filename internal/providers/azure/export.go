@@ -95,26 +95,15 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	errs := make([]error, len(rgs))
 	doRG := func(i int) { results[i], errs[i] = exportRG(ctx, run, inv, rgs[i]) }
 
-	// Populate the shared provider plugin cache with ONE serial `terraform init` before
-	// fanning out. aztfexport spawns ~11 `terraform init`s per invocation — even for the
-	// read-only `rg -g` pass — that all share TF_PLUGIN_CACHE_DIR, which Terraform
-	// documents as NOT concurrency-safe. On a COLD cache those writers race and leave a
-	// truncated provider binary, and on Windows every subsequent `terraform import` in
-	// that group then fails to exec it ("%1 is not a valid Win32 application" /
-	// "Failed to read any lines from plugin's stdout"). Warming with a single process
-	// first means every later init only READS a complete entry, which is safe to do
-	// concurrently. exportRG is otherwise parallel-safe (each writes its own dir).
-	warmed := warmProviderCache(ctx, run)
-
-	// With a warm cache the fan-out only reads it (safe). Without one, aztfexportEnv runs
-	// each group uncached (its own provider download); N groups × ~11 concurrent
-	// downloads is wasteful and network-heavy, so fall back to one group at a time.
-	par := exportParallelism()
-	if !warmed {
-		par = 1
-	}
+	// Export groups with a bounded worker pool (default: serial — see exportParallelism).
+	// There is deliberately NO shared provider plugin cache: aztfexport runs terraform
+	// init in ~parallelism worker dirs concurrently, and a shared TF_PLUGIN_CACHE_DIR is
+	// not concurrency-safe — on Windows the racing installs truncate the provider binary,
+	// which then crashes every import. Each aztfexport invocation manages its own provider
+	// (proven correct by running aztfexport standalone); exportRG is parallel-safe because
+	// each writes only its own dir.
 	if len(rgs) > 0 {
-		sem := make(chan struct{}, par)
+		sem := make(chan struct{}, exportParallelism())
 		var wg sync.WaitGroup
 		for i := range rgs {
 			wg.Add(1)
@@ -146,82 +135,19 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	return &provider.ExportResult{Mode: mode, Containers: containers}, nil
 }
 
-// providerCacheWarm reports whether the shared plugin cache already holds a COMPLETE
-// azurerm provider binary. Terraform lays the cache out as
-// <cache>/registry.terraform.io/hashicorp/azurerm/<version>/<os_arch>/terraform-provider-azurerm*,
-// so we match the executable itself — not just the version directory — and require a
-// plausible size. A run interrupted mid-populate can leave the directory present with a
-// truncated or missing binary, and treating that as "warm" is exactly what corrupts the
-// concurrent imports this guard exists to prevent. A match here means a fan-out will
-// only READ a finished binary.
-func providerCacheWarm() bool {
-	dir := pluginCacheDir()
-	if dir == "" {
-		return false
-	}
-	matches, err := filepath.Glob(filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "*", "*", "terraform-provider-azurerm*"))
-	if err != nil {
-		return false
-	}
-	for _, m := range matches {
-		if fi, err := os.Stat(m); err == nil && !fi.IsDir() && fi.Size() > 1<<20 {
-			return true // >1 MiB: a real provider binary, not a truncated stub
-		}
-	}
-	return false
-}
-
-// warmProviderCache populates the shared plugin cache with a single, serial
-// `terraform init` BEFORE any aztfexport invocation, and reports whether the cache is
-// now usable. One writer can populate the cache safely; after that the many concurrent
-// inits aztfexport spawns only ever READ a complete entry. On any failure (terraform
-// absent, offline, no cache dir) it returns false so callers run uncached — slower, but
-// never corrupt — rather than share a cold cache into a concurrent fan-out.
-func warmProviderCache(ctx context.Context, run *core.Run) bool {
-	cache := pluginCacheDir()
-	if cache == "" {
-		return false
-	}
-	if providerCacheWarm() {
-		return true // a previous run already populated it
-	}
-	tmp, err := os.MkdirTemp("", "tl-warmcache-")
-	if err != nil {
-		return false
-	}
-	defer os.RemoveAll(tmp)
-	// Unpinned azurerm resolves the same latest version aztfexport installs, so the
-	// entry we warm is the one the export will read.
-	cfg := "terraform {\n  required_providers {\n    azurerm = {\n      source = \"hashicorp/azurerm\"\n    }\n  }\n}\n"
-	if err := os.WriteFile(filepath.Join(tmp, "providers.tf"), []byte(cfg), 0o644); err != nil {
-		return false
-	}
-	cmd := exec.CommandContext(ctx, "terraform", "init", "-input=false", "-no-color", "-backend=false")
-	cmd.Dir = tmp
-	cmd.Env = append(withoutEnv(os.Environ(), "TF_PLUGIN_CACHE_DIR"), "TF_PLUGIN_CACHE_DIR="+cache)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		run.Log.Verbose("Export", "provider cache pre-warm failed (each group will download its own provider): %v", err)
-		run.Log.Verbose("Export", "%s", hcl.Tail(string(out), 10))
-		return false
-	}
-	if providerCacheWarm() {
-		run.Log.Info("Export", "provider plugin cache warmed once — resource groups will share it")
-		return true
-	}
-	return false
-}
-
-// exportParallelism bounds how many resource groups export concurrently. Kept
-// deliberately low: each group's aztfexport already runs ~10 operations in parallel
-// internally, and the shared limit that actually bites is ARM read throttling on the
-// subscription, not local CPU. TERRALIFT_EXPORT_PARALLELISM overrides it.
+// exportParallelism bounds how many resource groups export concurrently. It defaults
+// to 1 (serial): with no shared provider cache, each concurrent group's aztfexport
+// downloads its own copy of the (very large) azurerm provider across ~10 worker dirs,
+// so running several groups at once multiplies concurrent-download pressure for no
+// benefit. Serial matches the standalone-aztfexport behavior we verified as correct.
+// TERRALIFT_EXPORT_PARALLELISM raises it for operators who want the wall-clock trade.
 func exportParallelism() int {
 	if v := strings.TrimSpace(os.Getenv("TERRALIFT_EXPORT_PARALLELISM")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 3
+	return 1
 }
 
 func exportRG(ctx context.Context, run *core.Run, inv *model.Inventory, rg string) (*provider.ContainerExport, error) {
@@ -588,71 +514,21 @@ func aztfexportBin() string {
 func runAztfexport(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, aztfexportBin(), args...)
 	cmd.Dir = dir
-	cmd.Env = aztfexportEnv(args)
+	cmd.Env = aztfexportEnv()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// importsState reports whether this invocation will run per-resource `terraform
-// import`. Only that path is incompatible with a shared provider plugin cache
-// (see aztfexportEnv). `-g` (generate-mapping-only) and `--hcl-only` both author
-// without ever importing into state.
-func importsState(args []string) bool {
-	for _, a := range args {
-		if a == "-g" || a == "--generate-mapping-file" || a == "--hcl-only" {
-			return false
-		}
-	}
-	return true
-}
-
-// aztfexportEnv builds the child environment, deciding whether the Terraform
-// provider plugin cache may be shared.
-//
-// This matters enormously for wall-clock: aztfexport pre-creates one temp import
-// directory per --parallelism (default 10) and runs `terraform init` in each, PLUS
-// once in the output dir — ~11 provider installs per invocation, and it does this
-// even for the read-only `-g` discovery pass that never imports anything. We invoke
-// it twice per resource group, so an uncached run downloads the (very large) azurerm
-// provider ~22 times per group. That, not CPU, is why a dense group takes hours.
-//
-// The cache is NOT safe for the import path: a shared cache leaves the working
-// dir's lock file inconsistent with the cached provider, and every per-resource
-// `terraform import` then fails with "Required plugins are not installed". So we
-// keep stripping it there, and share it only for the non-importing passes.
-func aztfexportEnv(args []string) []string {
-	env := os.Environ()
-	if importsState(args) {
-		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
-	}
-	// Non-importing pass: share the cache ONLY when it is already fully populated. A
-	// cold or partial cache shared across aztfexport's ~11 concurrent inits corrupts the
-	// provider binary (see warmProviderCache), so absent a complete cache we run
-	// uncached — each invocation downloads its own provider: slower, but never corrupt.
-	cache := pluginCacheDir()
-	if cache == "" || !providerCacheWarm() {
-		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
-	}
-	return append(withoutEnv(env, "TF_PLUGIN_CACHE_DIR"), "TF_PLUGIN_CACHE_DIR="+cache)
-}
-
-// pluginCacheDir resolves the provider cache directory, honoring an operator-set
-// TF_PLUGIN_CACHE_DIR and otherwise defaulting to a stable per-user location.
-// Terraform requires the directory to already exist. Returns "" if it can't be
-// established, in which case callers fall back to an uncached (correct, slow) run.
-func pluginCacheDir() string {
-	dir := strings.TrimSpace(os.Getenv("TF_PLUGIN_CACHE_DIR"))
-	if dir == "" {
-		base, err := os.UserCacheDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(base, "terralift", "tf-plugin-cache")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ""
-	}
-	return dir
+// aztfexportEnv builds the child environment for aztfexport. It STRIPS
+// TF_PLUGIN_CACHE_DIR unconditionally: aztfexport runs `terraform init` in
+// ~parallelism worker directories concurrently, and a shared plugin cache is not
+// concurrency-safe — on Windows the racing installs truncate the provider binary,
+// which then crashes every import ("%1 is not a valid Win32 application", plugin
+// handshake failures, provider segfaults). Letting each aztfexport invocation manage
+// its own provider is slower (it re-downloads) but correct — this is exactly how
+// aztfexport behaves when run standalone, which we verified works.
+func aztfexportEnv() []string {
+	return withoutEnv(os.Environ(), "TF_PLUGIN_CACHE_DIR")
 }
 
 func withoutEnv(env []string, key string) []string {
