@@ -141,6 +141,36 @@ func TestWriteImportBlocksFromStateNoState(t *testing.T) {
 	}
 }
 
+// providerCacheWarm must recognize a COMPLETE provider binary and reject a truncated
+// stub — the exact corruption a cold-cache race leaves behind. Treating a truncated
+// binary as warm would share it into a concurrent fan-out and fail every import.
+func TestProviderCacheWarm(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TF_PLUGIN_CACHE_DIR", dir) // pluginCacheDir honors this
+	if providerCacheWarm() {
+		t.Fatal("empty cache must not be warm")
+	}
+	base := filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "4.58.0", "windows_amd64")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(base, "terraform-provider-azurerm_v4.58.0_x5.exe")
+	// A truncated binary (the race-corruption case) must NOT count as warm.
+	if err := os.WriteFile(bin, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if providerCacheWarm() {
+		t.Fatal("a truncated provider binary must not count as warm")
+	}
+	// A plausibly-complete binary (>1 MiB) counts as warm.
+	if err := os.WriteFile(bin, make([]byte, 1<<20+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !providerCacheWarm() {
+		t.Fatal("a complete provider binary should count as warm")
+	}
+}
+
 // The provider plugin cache may be shared for the non-importing passes (`-g`
 // discovery and `--hcl-only` authoring) but must stay stripped for the per-resource
 // `terraform import` path, which a shared cache breaks.

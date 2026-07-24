@@ -95,24 +95,28 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	errs := make([]error, len(rgs))
 	doRG := func(i int) { results[i], errs[i] = exportRG(ctx, run, inv, rgs[i]) }
 
-	// Groups export concurrently: exportRG is safe to run in parallel (each writes to
-	// its own per-group directory and only reads the inventory).
-	//
-	// The one hazard is a COLD shared provider cache — each aztfexport invocation starts
-	// ~parallelism concurrent `terraform init`s, and concurrent inits racing to populate
-	// an empty cache is a known file-lock failure. So when (and only when) the cache is
-	// cold, one group runs alone first to populate it. Gating on warmth matters: always
-	// serializing the first group would mean a two-group export gets no parallelism at
-	// all, which is the common case.
-	start := 0
-	if len(rgs) > 0 && !providerCacheWarm() {
-		doRG(0)
-		start = 1
+	// Populate the shared provider plugin cache with ONE serial `terraform init` before
+	// fanning out. aztfexport spawns ~11 `terraform init`s per invocation — even for the
+	// read-only `rg -g` pass — that all share TF_PLUGIN_CACHE_DIR, which Terraform
+	// documents as NOT concurrency-safe. On a COLD cache those writers race and leave a
+	// truncated provider binary, and on Windows every subsequent `terraform import` in
+	// that group then fails to exec it ("%1 is not a valid Win32 application" /
+	// "Failed to read any lines from plugin's stdout"). Warming with a single process
+	// first means every later init only READS a complete entry, which is safe to do
+	// concurrently. exportRG is otherwise parallel-safe (each writes its own dir).
+	warmed := warmProviderCache(ctx, run)
+
+	// With a warm cache the fan-out only reads it (safe). Without one, aztfexportEnv runs
+	// each group uncached (its own provider download); N groups × ~11 concurrent
+	// downloads is wasteful and network-heavy, so fall back to one group at a time.
+	par := exportParallelism()
+	if !warmed {
+		par = 1
 	}
-	if len(rgs) > start {
-		sem := make(chan struct{}, exportParallelism())
+	if len(rgs) > 0 {
+		sem := make(chan struct{}, par)
 		var wg sync.WaitGroup
-		for i := start; i < len(rgs); i++ {
+		for i := range rgs {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
@@ -142,17 +146,69 @@ func export(ctx context.Context, run *core.Run, inv *model.Inventory) (*provider
 	return &provider.ExportResult{Mode: mode, Containers: containers}, nil
 }
 
-// providerCacheWarm reports whether the shared provider plugin cache already holds
-// an azurerm provider. Terraform lays the cache out as
-// <cache>/registry.terraform.io/hashicorp/azurerm/<version>/<os_arch>/, so a match
-// there means a concurrent fan-out will only READ the cache, not race to populate it.
+// providerCacheWarm reports whether the shared plugin cache already holds a COMPLETE
+// azurerm provider binary. Terraform lays the cache out as
+// <cache>/registry.terraform.io/hashicorp/azurerm/<version>/<os_arch>/terraform-provider-azurerm*,
+// so we match the executable itself — not just the version directory — and require a
+// plausible size. A run interrupted mid-populate can leave the directory present with a
+// truncated or missing binary, and treating that as "warm" is exactly what corrupts the
+// concurrent imports this guard exists to prevent. A match here means a fan-out will
+// only READ a finished binary.
 func providerCacheWarm() bool {
 	dir := pluginCacheDir()
 	if dir == "" {
 		return false
 	}
-	matches, err := filepath.Glob(filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "*"))
-	return err == nil && len(matches) > 0
+	matches, err := filepath.Glob(filepath.Join(dir, "registry.terraform.io", "hashicorp", "azurerm", "*", "*", "terraform-provider-azurerm*"))
+	if err != nil {
+		return false
+	}
+	for _, m := range matches {
+		if fi, err := os.Stat(m); err == nil && !fi.IsDir() && fi.Size() > 1<<20 {
+			return true // >1 MiB: a real provider binary, not a truncated stub
+		}
+	}
+	return false
+}
+
+// warmProviderCache populates the shared plugin cache with a single, serial
+// `terraform init` BEFORE any aztfexport invocation, and reports whether the cache is
+// now usable. One writer can populate the cache safely; after that the many concurrent
+// inits aztfexport spawns only ever READ a complete entry. On any failure (terraform
+// absent, offline, no cache dir) it returns false so callers run uncached — slower, but
+// never corrupt — rather than share a cold cache into a concurrent fan-out.
+func warmProviderCache(ctx context.Context, run *core.Run) bool {
+	cache := pluginCacheDir()
+	if cache == "" {
+		return false
+	}
+	if providerCacheWarm() {
+		return true // a previous run already populated it
+	}
+	tmp, err := os.MkdirTemp("", "tl-warmcache-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(tmp)
+	// Unpinned azurerm resolves the same latest version aztfexport installs, so the
+	// entry we warm is the one the export will read.
+	cfg := "terraform {\n  required_providers {\n    azurerm = {\n      source = \"hashicorp/azurerm\"\n    }\n  }\n}\n"
+	if err := os.WriteFile(filepath.Join(tmp, "providers.tf"), []byte(cfg), 0o644); err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "terraform", "init", "-input=false", "-no-color", "-backend=false")
+	cmd.Dir = tmp
+	cmd.Env = append(withoutEnv(os.Environ(), "TF_PLUGIN_CACHE_DIR"), "TF_PLUGIN_CACHE_DIR="+cache)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		run.Log.Verbose("Export", "provider cache pre-warm failed (each group will download its own provider): %v", err)
+		run.Log.Verbose("Export", "%s", hcl.Tail(string(out), 10))
+		return false
+	}
+	if providerCacheWarm() {
+		run.Log.Info("Export", "provider plugin cache warmed once — resource groups will share it")
+		return true
+	}
+	return false
 }
 
 // exportParallelism bounds how many resource groups export concurrently. Kept
@@ -569,8 +625,12 @@ func aztfexportEnv(args []string) []string {
 	if importsState(args) {
 		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
 	}
+	// Non-importing pass: share the cache ONLY when it is already fully populated. A
+	// cold or partial cache shared across aztfexport's ~11 concurrent inits corrupts the
+	// provider binary (see warmProviderCache), so absent a complete cache we run
+	// uncached — each invocation downloads its own provider: slower, but never corrupt.
 	cache := pluginCacheDir()
-	if cache == "" {
+	if cache == "" || !providerCacheWarm() {
 		return withoutEnv(env, "TF_PLUGIN_CACHE_DIR")
 	}
 	return append(withoutEnv(env, "TF_PLUGIN_CACHE_DIR"), "TF_PLUGIN_CACHE_DIR="+cache)
